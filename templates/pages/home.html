@@ -1,0 +1,352 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}QuantumStock AI{% endblock %}
+
+{% block content %}
+
+<section class="mx-auto max-w-7xl py-24">
+
+<div class="text-center">
+
+<span class="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-5 py-2 text-cyan-400">
+
+AI Powered Stock Research Platform
+
+</span>
+
+<h1 class="mt-8 text-6xl font-black leading-tight">
+
+Research Stocks
+
+<span class="gradient-text">
+
+Like Institutions
+
+</span>
+
+</h1>
+
+<p class="mx-auto mt-8 max-w-3xl text-xl text-zinc-400">
+
+Professional stock screening, AI analysis, live NSE data, portfolio management and institutional research.
+
+</p>
+
+<div class="mt-12 flex justify-center gap-5">
+
+<a href="/scanner/" class="rounded-xl bg-cyan-500 px-8 py-4 font-bold text-black shadow-glow">
+
+Launch Scanner
+
+</a>
+
+<a href="/companies/" class="rounded-xl border border-zinc-700 px-8 py-4">
+
+Explore Companies
+
+</a>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="mx-auto mt-10 max-w-7xl">
+
+<div class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+
+<div class="glass p-8">
+
+<p class="text-zinc-400">
+Listed Companies
+</p>
+
+<h2 class="mt-3 text-5xl font-black">
+{{ total_companies }}
+</h2>
+
+</div>
+
+<div class="glass p-8">
+
+<p class="text-zinc-400">
+Market
+</p>
+
+<h2 class="mt-3 text-5xl font-black text-green-400">
+
+LIVE
+
+</h2>
+
+</div>
+
+<div class="glass p-8">
+
+<p class="text-zinc-400">
+Scanner
+</p>
+
+<h2 class="mt-3 text-5xl font-black">
+
+Ready
+
+</h2>
+
+</div>
+
+<div class="glass p-8">
+
+<p class="text-zinc-400">
+AI Engine
+</p>
+
+<h2 class="mt-3 text-5xl font-black gradient-text">
+
+v2
+
+</h2>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="mx-auto mt-20 max-w-7xl">
+
+<h2 class="mb-10 text-center text-4xl font-black">
+Platform Features
+</h2>
+
+<div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+
+<div class="glass rounded-2xl p-8">
+<h3 class="text-2xl font-bold">AI Analysis</h3>
+<p class="mt-3 text-zinc-400">
+Institution-grade AI stock research.
+</p>
+</div>
+
+<div class="glass rounded-2xl p-8">
+<h3 class="text-2xl font-bold">Live Scanner</h3>
+<p class="mt-3 text-zinc-400">
+Real-time breakout screening.
+</p>
+</div>
+
+<div class="glass rounded-2xl p-8">
+<h3 class="text-2xl font-bold">Portfolio</h3>
+<p class="mt-3 text-zinc-400">
+Professional portfolio tracking.
+</p>
+</div>
+
+<div class="glass rounded-2xl p-8">
+<h3 class="text-2xl font-bold">Watchlist</h3>
+<p class="mt-3 text-zinc-400">
+Unlimited smart watchlists.
+</p>
+</div>
+
+<div class="glass rounded-2xl p-8">
+<h3 class="text-2xl font-bold">Market News</h3>
+<p class="mt-3 text-zinc-400">
+Fast financial news updates.
+</p>
+</div>
+
+<div class="glass rounded-2xl p-8">
+<h3 class="text-2xl font-bold">Risk Control</h3>
+<p class="mt-3 text-zinc-400">
+Built for disciplined investing.
+</p>
+</div>
+
+</div>
+
+</section>
+
+<section class="mx-auto mt-20 mb-20 max-w-7xl">
+
+<div class="glass rounded-3xl p-16 text-center">
+
+<h2 class="text-5xl font-black">
+
+Ready to Trade Smarter?
+
+</h2>
+
+<p class="mx-auto mt-6 max-w-2xl text-xl text-zinc-400">
+
+Discover stocks using AI-powered institutional research.
+
+</p>
+
+<div class="mt-10">
+
+<a href="/scanner/" class="rounded-xl bg-cyan-500 px-10 py-4 font-bold text-black shadow-glow">
+
+Start Scanning
+
+</a>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="mx-auto mb-20 max-w-7xl">
+
+<h2 class="mb-8 text-4xl font-black">
+Live Market
+</h2>
+
+<div class="glass overflow-x-auto rounded-2xl">
+
+<table class="min-w-full">
+
+<thead>
+
+<tr class="border-b border-zinc-800">
+
+<th class="p-4 text-left">Symbol</th>
+<th class="p-4 text-right">Price</th>
+<th class="p-4 text-right">Change %</th>
+<th class="p-4 text-center">Status</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+{% for quote in market_quotes %}
+
+<tr class="border-b border-zinc-900">
+
+<td class="p-4 font-semibold">
+{{ quote.symbol }}
+</td>
+
+<td class="p-4 text-right">
+₹{{ quote.last_price }}
+</td>
+
+<td class="p-4 text-right">
+
+{% if quote.change_percent >= 0 %}
+
+<span class="font-bold text-green-400">
+
+▲ {{ quote.change_percent }}%
+
+</span>
+
+{% else %}
+
+<span class="font-bold text-red-400">
+
+▼ {{ quote.change_percent }}%
+
+</span>
+
+{% endif %}
+
+</td>
+
+<td class="p-4 text-center">
+{{ quote.market_status }}
+</td>
+
+</tr>
+
+{% empty %}
+
+<tr>
+
+<td colspan="4" class="p-8 text-center text-zinc-500">
+
+No market data available.
+
+</td>
+
+</tr>
+
+{% endfor %}
+
+</tbody>
+
+</table>
+
+</div>
+
+</section>
+
+<section class="mx-auto mb-20 max-w-7xl">
+
+<div class="grid gap-8 lg:grid-cols-2">
+
+<div class="glass rounded-2xl p-8">
+
+<h2 class="mb-6 text-3xl font-black text-green-400">
+📈 Top Gainers
+</h2>
+
+{% for stock in top_gainers %}
+
+<div class="mb-4 flex items-center justify-between border-b border-zinc-800 pb-3">
+
+<div>
+<div class="font-bold">{{ stock.symbol }}</div>
+<div class="text-sm text-zinc-400">{{ stock.company_name }}</div>
+</div>
+
+<div class="text-right">
+<div>₹{{ stock.last_price }}</div>
+<div class="font-bold text-green-400">
+▲ {{ stock.change_percent }}%
+</div>
+</div>
+
+</div>
+
+{% endfor %}
+
+</div>
+
+<div class="glass rounded-2xl p-8">
+
+<h2 class="mb-6 text-3xl font-black text-red-400">
+📉 Top Losers
+</h2>
+
+{% for stock in top_losers %}
+
+<div class="mb-4 flex items-center justify-between border-b border-zinc-800 pb-3">
+
+<div>
+<div class="font-bold">{{ stock.symbol }}</div>
+<div class="text-sm text-zinc-400">{{ stock.company_name }}</div>
+</div>
+
+<div class="text-right">
+<div>₹{{ stock.last_price }}</div>
+<div class="font-bold text-red-400">
+▼ {{ stock.change_percent }}%
+</div>
+</div>
+
+</div>
+
+{% endfor %}
+
+</div>
+
+</div>
+
+</section>
+
+{% endblock %}
