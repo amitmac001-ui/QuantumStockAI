@@ -17,6 +17,7 @@ Including another URLconf
 
 from django.contrib import admin
 from django.http import JsonResponse
+from apps.core.views import home
 from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -36,6 +37,8 @@ def health_check(request):
 
 
 urlpatterns = [
+
+    path("", home),
 
     path(
         "admin/",
