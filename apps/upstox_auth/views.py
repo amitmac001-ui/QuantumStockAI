@@ -1,19 +1,22 @@
-import requests
 import urllib.parse
 
+import requests
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import redirect
 
-from .models import UpstoxToken
+from apps.upstox_auth.services.oauth_service import oauth_service
 
 
 def login(request):
+    state = oauth_service.generate_state()
+    request.session["oauth_state"] = state
+
     params = {
         "response_type": "code",
         "client_id": settings.UPSTOX_CLIENT_ID,
         "redirect_uri": settings.UPSTOX_REDIRECT_URI,
-        "state": "quantumstock_ai_v2",
+        "state": state,
     }
 
     url = (
@@ -25,12 +28,23 @@ def login(request):
 
 
 def callback(request):
-
     code = request.GET.get("code")
+    state = request.GET.get("state")
 
     if not code:
         return JsonResponse(
             {"error": "Authorization code missing"},
+            status=400,
+        )
+
+    try:
+        oauth_service.validate_state(
+            request.session.get("oauth_state"),
+            state,
+        )
+    except Exception as exc:
+        return JsonResponse(
+            {"error": str(exc)},
             status=400,
         )
 
@@ -55,16 +69,16 @@ def callback(request):
     if "access_token" not in data:
         return JsonResponse(data, status=400)
 
-    UpstoxToken.objects.all().delete()
-
-    UpstoxToken.objects.create(
-        access_token=data["access_token"]
+    oauth_service.save_tokens(
+        access_token=data["access_token"],
+        refresh_token=data.get("refresh_token"),
+        expires_at=None,
     )
 
     return JsonResponse(
         {
             "status": "success",
-            "message": "Access Token Saved",
+            "message": "Authentication successful.",
             "user": data.get("user_name"),
         }
     )

@@ -1,0 +1,123 @@
+<section class="space-y-4">
+
+    <div class="grid gap-4 md:grid-cols-2">
+
+        <!-- Top Gainers -->
+
+        <div class="glass rounded-2xl p-4">
+
+            <div class="mb-4 flex items-center justify-between">
+
+                <h2 class="text-lg font-bold text-emerald-400">
+                    Top Gainers
+                </h2>
+
+                <span class="text-xs text-slate-400">
+                    LIVE
+                </span>
+
+            </div>
+
+            {% for stock in top_gainers|slice:":5" %}
+
+            <div class="flex items-center justify-between border-b border-slate-800 py-3 last:border-0">
+
+                <div>
+
+                    <div class="font-semibold text-white">
+                        {{ stock.symbol }}
+                    </div>
+
+                    <div class="text-xs text-slate-500">
+                        {{ stock.company_name }}
+                    </div>
+
+                </div>
+
+                <div class="text-right">
+
+                    <div class="font-semibold text-white">
+                        ₹{{ stock.last_price }}
+                    </div>
+
+                    <div class="text-sm font-semibold text-emerald-400">
+                        +{{ stock.change_percent }}%
+                    </div>
+
+                </div>
+
+            </div>
+
+            {% empty %}
+
+            <div class="py-8 text-center text-slate-500">
+
+                No Live Data
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+        <!-- Top Losers -->
+
+        <div class="glass rounded-2xl p-4">
+
+            <div class="mb-4 flex items-center justify-between">
+
+                <h2 class="text-lg font-bold text-red-400">
+                    Top Losers
+                </h2>
+
+                <span class="text-xs text-slate-400">
+                    LIVE
+                </span>
+
+            </div>
+
+            {% for stock in top_losers|slice:":5" %}
+
+            <div class="flex items-center justify-between border-b border-slate-800 py-3 last:border-0">
+
+                <div>
+
+                    <div class="font-semibold text-white">
+                        {{ stock.symbol }}
+                    </div>
+
+                    <div class="text-xs text-slate-500">
+                        {{ stock.company_name }}
+                    </div>
+
+                </div>
+
+                <div class="text-right">
+
+                    <div class="font-semibold text-white">
+                        ₹{{ stock.last_price }}
+                    </div>
+
+                    <div class="text-sm font-semibold text-red-400">
+                        {{ stock.change_percent }}%
+                    </div>
+
+                </div>
+
+            </div>
+
+            {% empty %}
+
+            <div class="py-8 text-center text-slate-500">
+
+                No Live Data
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+    </div>
+
+</section>

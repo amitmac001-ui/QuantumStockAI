@@ -1,8 +1,12 @@
+import logging
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from .market_service import MarketService
 from ..providers.upstox_client import UpstoxClient
+
+logger = logging.getLogger(__name__)
 
 
 class QuoteSyncService:
@@ -14,86 +18,40 @@ class QuoteSyncService:
         self.market = MarketService()
         self.channel_layer = get_channel_layer()
 
-    def _normalize_symbol(
-        self,
-        instrument,
-        item,
-    ):
-
-        symbol = getattr(
-            item,
-            "symbol",
-            None,
-        )
+    def _normalize_symbol(self, instrument, item):
+        symbol = getattr(item, "symbol", None)
 
         if symbol:
-            return (
-                symbol
-                .upper()
-                .strip()
-            )
+            return symbol.upper().strip()
 
         if ":" in instrument:
-            return (
-                instrument
-                .split(":")[-1]
-                .upper()
-                .strip()
-            )
+            return instrument.split(":")[-1].upper().strip()
 
         if "|" in instrument:
-            return (
-                instrument
-                .split("|")[-1]
-                .upper()
-                .strip()
-            )
+            return instrument.split("|")[-1].upper().strip()
 
-        return (
-            instrument
-            .upper()
-            .strip()
-        )
+        return instrument.upper().strip()
 
-    def _chunks(
-        self,
-        items,
-        size,
-    ):
+    def _chunks(self, items, size):
+        for i in range(0, len(items), size):
+            yield items[i:i + size]
 
-        for i in range(
-            0,
-            len(items),
-            size,
-        ):
-            yield items[
-                i:i + size
-            ]
-
-    def sync(
-        self,
-        instruments,
-    ):
+    def sync(self, instruments):
 
         if not instruments:
             return 0
 
         total_quotes = 0
 
-        for batch in self._chunks(
-            instruments,
-            self.BATCH_SIZE,
-        ):
+        for batch in self._chunks(instruments, self.BATCH_SIZE):
 
-            response = self.client.quote(
-                ",".join(batch)
-            )
+            try:
+                response = self.client.quote(",".join(batch))
+            except Exception:
+                logger.exception("Upstox quote request failed")
+                continue
 
-            data = getattr(
-                response,
-                "data",
-                None,
-            )
+            data = getattr(response, "data", None)
 
             if not data:
                 continue
@@ -102,58 +60,42 @@ class QuoteSyncService:
 
             for instrument, item in data.items():
 
-                print("=" * 80)
-                print("Instrument :", instrument)
-                print("Upstox Symbol :", getattr(item, "symbol", None))
-                print("=" * 80)
+                try:
+                    symbol = self._normalize_symbol(instrument, item)
 
-                symbol = self._normalize_symbol(
-                    instrument,
-                    item,
-                )
+                    ohlc = getattr(item, "ohlc", None)
 
-                quote = {
-                    "symbol": symbol,
-                    "last_price": float(
-                        item.last_price
-                    ),
-                    "open_price": float(
-                        item.ohlc.open
-                    ),
-                    "high_price": float(
-                        item.ohlc.high
-                    ),
-                    "low_price": float(
-                        item.ohlc.low
-                    ),
-                    "previous_close": float(
-                        item.ohlc.close
-                    ),
-                    "volume": int(
-                        item.volume or 0
-                    ),
-                }
+                    quote = {
+                        "symbol": symbol,
+                        "last_price": float(getattr(item, "last_price", 0) or 0),
+                        "open_price": float(getattr(ohlc, "open", 0) or 0),
+                        "high_price": float(getattr(ohlc, "high", 0) or 0),
+                        "low_price": float(getattr(ohlc, "low", 0) or 0),
+                        "previous_close": float(getattr(ohlc, "close", 0) or 0),
+                        "volume": int(getattr(item, "volume", 0) or 0),
+                    }
 
-                quotes.append(
-                    quote
-                )
+                    quotes.append(quote)
 
-                async_to_sync(
-                    self.channel_layer.group_send
-                )(
-                    "market",
-                    {
-                        "type": "market_message",
-                        "data": quote,
-                    },
-                )
+                    if self.channel_layer:
+                        async_to_sync(
+                            self.channel_layer.group_send
+                        )(
+                            "market",
+                            {
+                                "type": "market_message",
+                                "data": quote,
+                            },
+                        )
 
-            self.market.bulk_save(
-                quotes
-            )
+                except Exception:
+                    logger.exception(
+                        "Quote processing failed: %s",
+                        instrument,
+                    )
 
-            total_quotes += len(
-                quotes
-            )
+            if quotes:
+                self.market.bulk_save(quotes)
+                total_quotes += len(quotes)
 
         return total_quotes

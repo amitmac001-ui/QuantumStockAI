@@ -1,0 +1,77 @@
+<section class="space-y-4">
+
+    <div class="flex items-center justify-between">
+
+        <h2 class="text-lg font-bold text-white">
+            Market Indices
+        </h2>
+
+        <a href="{% url 'market:indices' %}"
+           class="text-sm font-medium text-indigo-400 hover:text-indigo-300">
+            View All
+        </a>
+
+    </div>
+
+    <div class="grid gap-4 md:grid-cols-2">
+
+        {% for index in market_indices %}
+
+        <article
+            class="glass rounded-2xl p-4 transition duration-300 hover:scale-[1.01]">
+
+            <div class="flex items-center justify-between">
+
+                <div>
+
+                    <h3 class="font-semibold text-white">
+                        {{ index.name }}
+                    </h3>
+
+                    <p class="mt-1 text-2xl font-bold">
+
+                        {{ index.last_price }}
+
+                    </p>
+
+                    <p class="{% if index.change_percent >= 0 %}text-emerald-400{% else %}text-red-400{% endif %} text-sm font-medium">
+
+                        {{ index.change_percent }}%
+
+                    </p>
+
+                </div>
+
+                <span
+                    class="rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-400">
+
+                    LIVE
+
+                </span>
+
+            </div>
+
+            <div class="mt-4 h-20">
+
+                <canvas
+                    class="market-chart"
+                    data-symbol="{{ index.symbol }}">
+                </canvas>
+
+            </div>
+
+        </article>
+
+        {% empty %}
+
+        <div class="glass rounded-2xl p-5 text-center text-slate-400">
+
+            No live market data available.
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+</section>

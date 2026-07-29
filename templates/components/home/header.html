@@ -1,0 +1,77 @@
+<header class="sticky top-0 z-40 rounded-2xl border border-slate-800 bg-[#0b1220]/90 backdrop-blur-xl">
+
+    <div class="flex items-center justify-between p-4">
+
+        <div class="flex items-center gap-3">
+
+            <button
+                id="menuButton"
+                class="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 transition hover:bg-slate-800">
+
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     class="h-6 w-6 text-white"
+                     fill="none"
+                     viewBox="0 0 24 24"
+                     stroke="currentColor">
+
+                    <path stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M4 6h16M4 12h16M4 18h16"/>
+
+                </svg>
+
+            </button>
+
+            <div>
+
+                <h1 class="text-xl font-black tracking-wide text-white">
+
+                    QuantumStock AI
+
+                </h1>
+
+                <p class="text-xs text-slate-400">
+
+                    Professional Stock Intelligence
+
+                </p>
+
+            </div>
+
+        </div>
+
+        <div class="flex items-center gap-2">
+
+            <button
+                class="relative flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 hover:bg-slate-800">
+
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     class="h-6 w-6 text-white"
+                     fill="none"
+                     viewBox="0 0 24 24"
+                     stroke="currentColor">
+
+                    <path stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0a3 3 0 11-6 0"/>
+
+                </svg>
+
+                <span class="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500"></span>
+
+            </button>
+
+            <a href="{% url 'accounts:profile' %}"
+               class="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-indigo-500 to-cyan-500 text-sm font-bold text-white">
+
+                A
+
+            </a>
+
+        </div>
+
+    </div>
+
+</header>

@@ -1,0 +1,82 @@
+<section class="space-y-4">
+
+    <div class="glass rounded-2xl p-5">
+
+        <div class="mb-5 flex items-center justify-between">
+
+            <div>
+
+                <h2 class="text-lg font-bold text-white">
+                    Watchlist
+                </h2>
+
+                <p class="mt-1 text-xs text-slate-400">
+                    Live Market Tracking
+                </p>
+
+            </div>
+
+            <a href="{% url 'portfolio:watchlist' %}"
+               class="text-sm font-medium text-indigo-400 hover:text-indigo-300">
+
+                View All
+
+            </a>
+
+        </div>
+
+        {% for stock in watchlist %}
+
+        <div class="flex items-center justify-between border-b border-slate-800 py-4 last:border-0">
+
+            <div>
+
+                <div class="font-semibold text-white">
+
+                    {{ stock.symbol }}
+
+                </div>
+
+                <div class="mt-1 text-xs text-slate-500">
+
+                    {{ stock.company_name }}
+
+                </div>
+
+            </div>
+
+            <div class="text-right">
+
+                <div class="font-semibold text-white">
+
+                    ₹{{ stock.last_price }}
+
+                </div>
+
+                <div class="{% if stock.change_percent >= 0 %}text-emerald-400{% else %}text-red-400{% endif %} text-sm font-semibold">
+
+                    {{ stock.change_percent }}%
+
+                </div>
+
+            </div>
+
+        </div>
+
+        {% empty %}
+
+        <div class="rounded-xl border border-dashed border-slate-700 py-10 text-center">
+
+            <p class="text-slate-500">
+
+                Watchlist Empty
+
+            </p>
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+</section>

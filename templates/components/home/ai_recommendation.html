@@ -1,0 +1,131 @@
+<section class="space-y-4">
+
+    <div class="glass rounded-2xl p-5">
+
+        <div class="mb-5 flex items-center justify-between">
+
+            <div>
+
+                <h2 class="text-lg font-bold text-white">
+                    AI Recommendation
+                </h2>
+
+                <p class="mt-1 text-xs text-slate-400">
+                    Live AI Analysis
+                </p>
+
+            </div>
+
+            {% if ai_recommendation.signal == "BUY" %}
+
+                <span class="rounded-full bg-emerald-500/15 px-4 py-2 text-xs font-bold text-emerald-400">
+                    BUY
+                </span>
+
+            {% elif ai_recommendation.signal == "SELL" %}
+
+                <span class="rounded-full bg-red-500/15 px-4 py-2 text-xs font-bold text-red-400">
+                    SELL
+                </span>
+
+            {% else %}
+
+                <span class="rounded-full bg-yellow-500/15 px-4 py-2 text-xs font-bold text-yellow-400">
+                    HOLD
+                </span>
+
+            {% endif %}
+
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+
+            <div class="rounded-xl bg-slate-900/60 p-4">
+
+                <p class="text-xs uppercase tracking-wide text-slate-400">
+                    Company
+                </p>
+
+                <p class="mt-2 text-lg font-bold text-white">
+                    {{ ai_recommendation.symbol|default:"--" }}
+                </p>
+
+            </div>
+
+            <div class="rounded-xl bg-slate-900/60 p-4">
+
+                <p class="text-xs uppercase tracking-wide text-slate-400">
+                    Confidence
+                </p>
+
+                <p class="mt-2 text-lg font-bold text-indigo-400">
+                    {{ ai_recommendation.confidence|default:"0" }}%
+                </p>
+
+            </div>
+
+            <div class="rounded-xl bg-slate-900/60 p-4">
+
+                <p class="text-xs uppercase tracking-wide text-slate-400">
+                    Entry
+                </p>
+
+                <p class="mt-2 text-lg font-bold text-white">
+                    ₹{{ ai_recommendation.entry_price|default:"--" }}
+                </p>
+
+            </div>
+
+            <div class="rounded-xl bg-slate-900/60 p-4">
+
+                <p class="text-xs uppercase tracking-wide text-slate-400">
+                    Target
+                </p>
+
+                <p class="mt-2 text-lg font-bold text-emerald-400">
+                    ₹{{ ai_recommendation.target_price|default:"--" }}
+                </p>
+
+            </div>
+
+            <div class="rounded-xl bg-slate-900/60 p-4">
+
+                <p class="text-xs uppercase tracking-wide text-slate-400">
+                    Stop Loss
+                </p>
+
+                <p class="mt-2 text-lg font-bold text-red-400">
+                    ₹{{ ai_recommendation.stop_loss|default:"--" }}
+                </p>
+
+            </div>
+
+            <div class="rounded-xl bg-slate-900/60 p-4">
+
+                <p class="text-xs uppercase tracking-wide text-slate-400">
+                    Risk
+                </p>
+
+                <p class="mt-2 text-lg font-bold text-amber-400">
+                    {{ ai_recommendation.risk|default:"--" }}
+                </p>
+
+            </div>
+
+        </div>
+
+        <div class="mt-5 rounded-xl bg-slate-900/60 p-4">
+
+            <p class="mb-2 text-xs uppercase tracking-wide text-slate-400">
+                AI Reason
+            </p>
+
+            <p class="text-sm leading-7 text-slate-300">
+                {{ ai_recommendation.reason|default:"No Recommendation" }}
+            </p>
+
+        </div>
+
+    </div>
+
+</section>
