@@ -30,6 +30,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install minimal runtime
+        working-directory: ${{ runner.temp }}
         run: >-
           python -m pip install
           gspread==6.2.1
