@@ -1,0 +1,43 @@
+name: LIVE_MARKET cloud refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate providers without updating the Sheet
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Every five minutes around NSE hours; script enforces 09:15-15:30 IST.
+    - cron: "2-57/5 3-10 * * 1-5"
+
+concurrency:
+  group: live-market-google-sheet
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  fast-quotes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install minimal runtime
+        run: >-
+          python -m pip install
+          gspread==6.2.1
+          google-auth==2.56.0
+          requests==2.34.2
+      - name: Refresh verified live columns
+        env:
+          CLOUD_SYNC_CONFIG: ${{ secrets.CLOUD_SYNC_CONFIG }}
+        run: >-
+          python scripts/github_live_sheet_sync.py
+          ${{ inputs.dry_run && '--dry-run' || '' }}
