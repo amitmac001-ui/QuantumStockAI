@@ -141,9 +141,9 @@ class CloudOutcomePersistenceTests(TestCase):
         self.assertEqual(verified["mismatched"], 0)
         self.assertEqual(verified["duplicates"], 0)
 
-    def test_workflow_has_lock_schedule_and_no_capture_command(self):
+    def test_workflow_has_lock_schedule_and_compact_capture_command(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "prebreakout-outcomes.yml").read_text(encoding="utf-8")
         self.assertIn('cron: "45 10 * * 1-5"', workflow)
         self.assertIn("group: prebreakout-outcome-post-market", workflow)
-        self.assertIn("python manage.py run_cloud_outcome_cycle", workflow)
-        self.assertNotIn("--capture", workflow)
+        self.assertIn("python manage.py run_cloud_snapshot_cycle --history-limit 500", workflow)
+        self.assertIn("UPSTOX_ANALYTICS_TOKEN", workflow)

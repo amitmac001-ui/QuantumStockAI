@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+import pandas as pd
+
 
 @dataclass(slots=True)
 class ScanContext:
@@ -8,6 +10,8 @@ class ScanContext:
     symbol: str
 
     candles: list
+
+    dataframe: pd.DataFrame | None = None
 
     quote: Any = None
 

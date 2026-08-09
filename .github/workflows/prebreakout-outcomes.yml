@@ -23,6 +23,8 @@ jobs:
       DJANGO_DEBUG: "False"
       CHANNEL_BACKEND: memory
       OUTCOME_WORKER_MODE: "1"
+      CLOUD_COMPACT_MARKET_DATA: "1"
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,19 +33,6 @@ jobs:
           cache: pip
       - name: Install project dependencies
         run: pip install -r requirements.txt
-      - name: Load masked read-only market token
-        env:
-          CLOUD_SYNC_CONFIG: ${{ secrets.CLOUD_SYNC_CONFIG }}
-        shell: python
-        run: |
-          import json, os
-          from pathlib import Path
-          token = str(json.loads(os.environ["CLOUD_SYNC_CONFIG"]).get("upstox_access_token", "")).strip()
-          if not token:
-              raise SystemExit("CLOUD_SYNC_CONFIG has no Upstox access token")
-          print(f"::add-mask::{token}")
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
-              stream.write(f"UPSTOX_ACCESS_TOKEN={token}\n")
       - name: Apply idempotent Django migrations
         run: python manage.py migrate --noinput
       - name: Import and verify optional one-time outcome seed
@@ -74,5 +63,5 @@ jobs:
                   sys.executable, "manage.py", "verify_prebreakout_cloud_seed",
                   "--input", str(seed),
               ], check=True)
-      - name: Evaluate persisted snapshots only
-        run: python manage.py run_cloud_outcome_cycle
+      - name: Incremental EOD ingest, capture, and outcome evaluation
+        run: python manage.py run_cloud_snapshot_cycle --history-limit 500

@@ -1,6 +1,10 @@
 from django.db import models
 from django.utils import timezone
 import uuid
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
+
+from apps.companies.models import Company
 
 
 class Exchange(models.TextChoices):
@@ -163,3 +167,98 @@ class MarketOHLC(models.Model):
 
     def __str__(self):
         return f"{self.symbol} {self.interval}"
+
+
+class CloudDailyCandle(models.Model):
+    """Compact rolling EOD history for cloud scanner execution."""
+
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, related_name="cloud_daily_candles"
+    )
+    session_date = models.DateField()
+    open = models.DecimalField(max_digits=20, decimal_places=4)
+    high = models.DecimalField(max_digits=20, decimal_places=4)
+    low = models.DecimalField(max_digits=20, decimal_places=4)
+    close = models.DecimalField(max_digits=20, decimal_places=4)
+    volume = models.BigIntegerField(default=0)
+    provider_timestamp = models.DateTimeField(null=True, blank=True)
+    data_quality_flags = models.JSONField(default=list, blank=True)
+    ingested_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-session_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company", "session_date"],
+                name="uq_cloud_daily_company_session",
+            )
+        ]
+
+    @property
+    def symbol(self):
+        return self.company.symbol
+
+    @property
+    def exchange(self):
+        return self.company.exchange
+
+    @property
+    def candle_time(self):
+        return datetime.combine(
+            self.session_date, time.min, tzinfo=ZoneInfo("Asia/Kolkata")
+        )
+
+
+class CloudBenchmarkCandle(models.Model):
+    """Compact rolling NIFTY 50 EOD history."""
+
+    session_date = models.DateField(unique=True)
+    open = models.DecimalField(max_digits=20, decimal_places=4)
+    high = models.DecimalField(max_digits=20, decimal_places=4)
+    low = models.DecimalField(max_digits=20, decimal_places=4)
+    close = models.DecimalField(max_digits=20, decimal_places=4)
+    volume = models.BigIntegerField(default=0)
+    provider_timestamp = models.DateTimeField(null=True, blank=True)
+    data_quality_flags = models.JSONField(default=list, blank=True)
+    ingested_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-session_date"]
+
+    @property
+    def candle_time(self):
+        return datetime.combine(
+            self.session_date, time.min, tzinfo=ZoneInfo("Asia/Kolkata")
+        )
+
+
+class CloudQuoteSnapshot(models.Model):
+    """One genuine latest quote per active cloud instrument."""
+
+    company = models.OneToOneField(
+        Company, on_delete=models.CASCADE, primary_key=True,
+        related_name="cloud_quote_snapshot",
+    )
+    last_price = models.DecimalField(max_digits=20, decimal_places=4)
+    open_price = models.DecimalField(max_digits=20, decimal_places=4)
+    high_price = models.DecimalField(max_digits=20, decimal_places=4)
+    low_price = models.DecimalField(max_digits=20, decimal_places=4)
+    previous_close = models.DecimalField(max_digits=20, decimal_places=4)
+    change = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    change_percent = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    volume = models.BigIntegerField(default=0)
+    provider_timestamp = models.DateTimeField(null=True, blank=True)
+    last_trade_time = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def symbol(self):
+        return self.company.symbol
+
+    @property
+    def exchange(self):
+        return self.company.exchange
+
+    @property
+    def company_name(self):
+        return self.company.name

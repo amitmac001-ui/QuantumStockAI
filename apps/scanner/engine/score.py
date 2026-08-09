@@ -8,63 +8,52 @@ class ScoreEngine:
 
         if not results:
             return {
-                "score": 0.0,
+                "total_score": 0.0,
                 "confidence": 0.0,
-                "signal": "WAIT",
+                "verdict": "WAIT",
+            }
+
+        valid_results = [
+            r for r in results
+            if isinstance(r, ScanResult)
+        ]
+
+        if not valid_results:
+            return {
+                "total_score": 0.0,
+                "confidence": 0.0,
+                "verdict": "WAIT",
             }
 
         total_score = 0.0
         total_confidence = 0.0
         total_weight = 0.0
 
-        for result in results:
+        for result in valid_results:
 
-            if not isinstance(result, ScanResult):
-                continue
+            weight = max(result.confidence, 1.0)
 
-            weight = max(
-                result.confidence,
-                1.0,
-            )
-
-            total_score += (
-                result.score * weight
-            )
-
-            total_confidence += (
-                result.confidence
-            )
-
+            total_score += result.score * weight
+            total_confidence += result.confidence
             total_weight += weight
 
-        if total_weight == 0:
-            return {
-                "score": 0.0,
-                "confidence": 0.0,
-                "signal": "WAIT",
-            }
-
-        score = round(
-            total_score / total_weight,
-            2,
-        )
-
+        score = round(total_score / total_weight, 2)
         confidence = round(
-            total_confidence / len(results),
+            total_confidence / len(valid_results),
             2,
         )
 
         if score >= 80:
-            signal = "BUY"
+            verdict = "BUY"
         elif score >= 60:
-            signal = "HOLD"
+            verdict = "HOLD"
         elif score >= 40:
-            signal = "WAIT"
+            verdict = "WAIT"
         else:
-            signal = "SELL"
+            verdict = "SELL"
 
         return {
-            "score": score,
+            "total_score": score,
             "confidence": confidence,
-            "signal": signal,
+            "verdict": verdict,
         }

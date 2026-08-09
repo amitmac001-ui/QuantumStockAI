@@ -6,9 +6,11 @@ from decimal import Decimal
 from statistics import mean, median
 from typing import TYPE_CHECKING, Iterable
 
+from django.conf import settings
 from django.db import transaction
 
-from apps.market.models import MarketOHLC
+from apps.companies.models import Company
+from apps.market.models import CloudDailyCandle, MarketOHLC
 from apps.market.services.daily_history_sync_service import DailyHistorySyncService
 if TYPE_CHECKING:
     from apps.scanner.engine.decision_engine import ScanReport
@@ -130,21 +132,41 @@ class PreBreakoutOutcomeService:
     @classmethod
     def evaluate_pending(cls) -> OutcomeTrackingResult:
         evaluated = completed = 0
-        setups = PreBreakoutSetupOutcome.objects.filter(is_complete=False).iterator(
-            chunk_size=500
-        )
-        for setup in setups:
-            evaluation_time = DailyHistorySyncService.canonical_session_timestamp(
-                setup.evaluation_session
+        setups = list(PreBreakoutSetupOutcome.objects.filter(is_complete=False))
+        cloud_candles: dict[int, list[CloudDailyCandle]] = {}
+        company_ids: dict[tuple[str, str], int] = {}
+        if settings.CLOUD_COMPACT_MARKET_DATA and setups:
+            keys = {(setup.symbol, setup.exchange) for setup in setups}
+            symbols = {key[0] for key in keys}
+            companies = Company.objects.filter(symbol__in=symbols).only(
+                "id", "symbol", "exchange"
             )
-            candles = list(
-                MarketOHLC.objects.filter(
+            company_ids = {
+                (company.symbol, company.exchange): company.id for company in companies
+                if (company.symbol, company.exchange) in keys
+            }
+            compact = CloudDailyCandle.objects.filter(
+                company_id__in=company_ids.values()
+            ).select_related("company").order_by("company_id", "session_date")
+            for candle in compact.iterator(chunk_size=5_000):
+                cloud_candles.setdefault(candle.company_id, []).append(candle)
+        for setup in setups:
+            if settings.CLOUD_COMPACT_MARKET_DATA:
+                company_id = company_ids.get((setup.symbol, setup.exchange))
+                candles = [
+                    candle for candle in cloud_candles.get(company_id, [])
+                    if candle.session_date > setup.evaluation_session
+                ][:20]
+            else:
+                evaluation_time = DailyHistorySyncService.canonical_session_timestamp(
+                    setup.evaluation_session
+                )
+                candles = list(MarketOHLC.objects.filter(
                     symbol=setup.symbol,
                     exchange=setup.exchange,
                     interval=MarketOHLC.Interval.D1,
                     candle_time__gt=evaluation_time,
-                ).order_by("candle_time")[:20]
-            )
+                ).order_by("candle_time")[:20])
             if not candles:
                 continue
             price = float(setup.evaluation_price)
@@ -155,7 +177,6 @@ class PreBreakoutOutcomeService:
                     field = f"return_{horizon}d"
                     setattr(setup, field, cls._return(price, float(candles[horizon - 1].close)))
                     updates.append(field)
-
             highs = [float(candle.high) for candle in candles]
             lows = [float(candle.low) for candle in candles]
             setup.maximum_favorable_excursion = cls._decimal((max(highs) / price - 1) * 100)
@@ -183,8 +204,7 @@ class PreBreakoutOutcomeService:
             setup.save(update_fields=[
                 *updates, "maximum_favorable_excursion", "maximum_adverse_excursion",
                 "breakout_occurred", "breakout_session", "sessions_to_breakout",
-                "failed_breakout",
-                "evaluated_through_session", "is_complete", "updated_at",
+                "failed_breakout", "evaluated_through_session", "is_complete", "updated_at",
             ])
             evaluated += 1
             completed += int(setup.is_complete)

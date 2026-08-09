@@ -1,33 +1,23 @@
+"""
+Legacy Strategy Registry
+
+Deprecated.
+
+DecisionEngine directly owns and executes all strategies.
+This module is kept only for backward compatibility.
+"""
+
+
 class StrategyRegistry:
 
-    _strategies = {}
-
     @classmethod
-    def register(cls, strategy):
-
-        cls._strategies[strategy.name] = strategy
-
-    @classmethod
-    def get(cls, name):
-
-        return cls._strategies.get(name)
-
-    @classmethod
-    def all(cls):
-
-        return tuple(
-            sorted(
-                cls._strategies.values(),
-                key=lambda s: s.priority,
-            )
-        )
+    def register(cls, *args, **kwargs):
+        pass
 
     @classmethod
     def clear(cls):
-
-        cls._strategies.clear()
+        pass
 
     @classmethod
-    def count(cls):
-
-        return len(cls._strategies)
+    def all(cls):
+        return []

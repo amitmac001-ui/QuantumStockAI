@@ -1,49 +1,26 @@
-import logging
+"""
+Legacy Scanner Engine
 
-from apps.market.repositories.market_repository import MarketRepository
+Deprecated.
 
-from .registry import StrategyRegistry
-from .result import ScanContext
+This module is kept only for backward compatibility.
 
-logger = logging.getLogger(__name__)
+Use:
+apps.scanner.engine.decision_engine.scanner_engine
+instead.
+"""
+
+from apps.scanner.engine.decision_engine import scanner_engine
 
 
 class ScannerEngine:
 
     @classmethod
-    def run(cls, symbol):
+    def run(cls, snapshot):
 
-        candles = list(
-            MarketRepository.history(symbol)
-        )
+        report = scanner_engine.scan(snapshot)
 
-        if not candles:
+        if report is None:
             return []
 
-        context = ScanContext(
-            symbol=symbol,
-            candles=candles,
-            quote=None,
-        )
-
-        results = []
-
-        for strategy in StrategyRegistry.all():
-
-            try:
-
-                result = strategy.execute(
-                    context
-                )
-
-                if result is not None:
-                    results.append(result)
-
-            except Exception:
-
-                logger.exception(
-                    "Scanner strategy failed: %s",
-                    strategy.name,
-                )
-
-        return results
+        return report.results
