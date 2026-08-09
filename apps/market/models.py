@@ -58,6 +58,14 @@ class MarketQuote(models.Model):
         blank=True,
     )
 
+    # Provider-supplied quote snapshot timestamp. This is not the exchange trade time;
+    # use last_trade_time for that. Both are distinct from the DB updated_at time.
+    provider_timestamp = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     updated_at = models.DateTimeField(auto_now=True)
@@ -122,6 +130,13 @@ class MarketOHLC(models.Model):
     volume = models.BigIntegerField(default=0)
 
     candle_time = models.DateTimeField(db_index=True)
+
+    # Exact timestamp supplied by the provider. candle_time remains the canonical
+    # exchange-session key used for idempotent daily upserts.
+    provider_timestamp = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    # Provider/pipeline quality metadata is retained verbatim when available.
+    data_quality_flags = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(default=timezone.now)
 

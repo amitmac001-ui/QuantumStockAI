@@ -4,6 +4,12 @@ from django.db import models
 
 
 class Company(models.Model):
+    class InstrumentStatus(models.TextChoices):
+        ACTIVE = "active", "Active"
+        SUSPENDED = "suspended", "Suspended"
+        INACTIVE = "inactive", "Inactive"
+        INVALID = "invalid", "Invalid instrument"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -81,6 +87,19 @@ class Company(models.Model):
         db_index=True,
     )
 
+    instrument_status = models.CharField(
+        max_length=20,
+        choices=InstrumentStatus.choices,
+        default=InstrumentStatus.ACTIVE,
+        db_index=True,
+    )
+
+    instrument_status_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
@@ -101,9 +120,18 @@ class Company(models.Model):
             models.Index(fields=["sector"]),
             models.Index(fields=["industry"]),
             models.Index(fields=["is_active"]),
+            models.Index(fields=["instrument_status"]),
             models.Index(fields=["exchange", "symbol"]),
             models.Index(fields=["exchange", "upstox_instrument_key"]),
         ]
 
     def __str__(self):
         return f"{self.symbol} - {self.name}"
+
+    @property
+    def is_scan_eligible(self) -> bool:
+        return bool(
+            self.is_active
+            and self.instrument_status == self.InstrumentStatus.ACTIVE
+            and str(self.upstox_instrument_key or "").strip()
+        )
