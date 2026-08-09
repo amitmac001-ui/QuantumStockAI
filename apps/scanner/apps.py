@@ -8,9 +8,4 @@ class ScannerConfig(AppConfig):
     name = "apps.scanner"
 
     def ready(self):
-
-        from apps.scanner.engine.discovery import discover
-        from apps.scanner.engine.registry import StrategyRegistry
-
-        StrategyRegistry.clear()
-        discover()
+        pass

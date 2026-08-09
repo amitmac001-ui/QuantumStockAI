@@ -5,10 +5,11 @@ from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from apps.market.models import MarketOHLC
+from apps.market.models import CloudBenchmarkCandle, MarketOHLC
 from apps.market.providers.historical_client import HistoricalClient
 
 
@@ -129,6 +130,22 @@ class BenchmarkHistoryService:
 
     @classmethod
     def load_ohlcv_frame(cls, limit: int = 0) -> pd.DataFrame:
+        if settings.CLOUD_COMPACT_MARKET_DATA:
+            queryset = CloudBenchmarkCandle.objects.order_by("-session_date")
+            if limit > 0:
+                queryset = queryset[:limit]
+            rows = list(queryset.values(
+                "session_date", "open", "high", "low", "close", "volume"
+            ))
+            rows.reverse()
+            return pd.DataFrame({
+                "timestamp": [row["session_date"] for row in rows],
+                "open": [float(row["open"]) for row in rows],
+                "high": [float(row["high"]) for row in rows],
+                "low": [float(row["low"]) for row in rows],
+                "close": [float(row["close"]) for row in rows],
+                "volume": [int(row["volume"]) for row in rows],
+            })
         queryset = MarketOHLC.objects.filter(
             symbol=cls.SYMBOL,
             exchange=cls.EXCHANGE,
