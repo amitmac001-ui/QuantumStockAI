@@ -66,6 +66,19 @@ class ReadOnlyProviderTests(SimpleTestCase):
         quote_v3_api.return_value.get_market_quote_ohlc.assert_called_once_with(
             interval="1d", instrument_key="NSE_EQ|TEST"
         )
+    def test_cloud_quote_parser_preserves_provider_times(self):
+        item = SimpleNamespace(
+            symbol="NA", last_price=105, net_change=5, volume=1234,
+            timestamp="2026-08-07T15:30:00+05:30",
+            last_trade_time=1786096800000,
+            ohlc=SimpleNamespace(open=101, high=106, low=100, close=100),
+        )
+        parsed = CloudEODIngestionService._build_cloud_quote("NSE_EQ:ACTIVE", item)
+        self.assertEqual(parsed["symbol"], "ACTIVE")
+        self.assertEqual(parsed["previous_close"], 100)
+        self.assertEqual(parsed["change_percent"], 5)
+        self.assertEqual(parsed["provider_timestamp"].isoformat(), "2026-08-07T15:30:00+05:30")
+        self.assertIsNotNone(parsed["last_trade_time"])
 
 class FakeHistory:
     def __init__(self, rows):
