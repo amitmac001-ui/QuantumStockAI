@@ -4,13 +4,15 @@ import gzip
 import json
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 from typing import Any
 
 import requests
 from django.db import connection, transaction
 from django.db.models import Max
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.companies.models import Company
 from apps.market.models import (
@@ -21,7 +23,6 @@ from apps.market.models import (
 from apps.market.providers.historical_client import HistoricalClient
 from apps.market.providers.upstox_client import UpstoxClient
 from apps.market.services.daily_history_sync_service import DailyHistorySyncService
-from apps.market.services.quote_sync import QuoteSyncService
 
 
 @dataclass(slots=True)
@@ -293,6 +294,59 @@ class CloudEODIngestionService:
         for index in range(0, len(items), size):
             yield items[index:index + size]
 
+    @staticmethod
+    def _parse_quote_timestamp(value):
+        if value in (None, ""):
+            return None
+        parsed = parse_datetime(str(value))
+        if parsed is None:
+            return None
+        return timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed
+
+    @classmethod
+    def _parse_last_trade_time(cls, value):
+        if value in (None, ""):
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return cls._parse_quote_timestamp(value)
+        if numeric > 10_000_000_000:
+            numeric /= 1000.0
+        return datetime.fromtimestamp(numeric, tz=datetime_timezone.utc)
+
+    @classmethod
+    def _build_cloud_quote(cls, response_key, item):
+        symbol = str(getattr(item, "symbol", "") or "").strip().upper()
+        if not symbol or symbol == "NA":
+            symbol = str(response_key).split(":")[-1].split("|")[-1].strip().upper()
+        ohlc = getattr(item, "ohlc", None)
+        last_price = float(getattr(item, "last_price", 0) or 0)
+        net_change = float(getattr(item, "net_change", 0) or 0)
+        previous_close = last_price - net_change
+        if previous_close <= 0:
+            previous_close = float(getattr(ohlc, "close", 0) or 0)
+        if previous_close <= 0:
+            previous_close = last_price
+        change = net_change if net_change else last_price - previous_close
+        return {
+            "symbol": symbol,
+            "last_price": last_price,
+            "open_price": float(getattr(ohlc, "open", 0) or 0),
+            "high_price": float(getattr(ohlc, "high", 0) or 0),
+            "low_price": float(getattr(ohlc, "low", 0) or 0),
+            "previous_close": previous_close,
+            "change": change,
+            "change_percent": (change / previous_close * 100) if previous_close else 0,
+            "volume": int(getattr(item, "volume", 0) or 0),
+            "provider_timestamp": cls._parse_quote_timestamp(
+                getattr(item, "timestamp", None)
+            ),
+            "last_trade_time": cls._parse_last_trade_time(
+                getattr(item, "last_trade_time", None)
+            ),
+        }
+
     def sync_quotes(self) -> int:
         companies = list(Company.objects.filter(
             exchange="NSE", is_active=True,
@@ -302,13 +356,12 @@ class CloudEODIngestionService:
         ))
         by_symbol = {company.symbol: company for company in companies}
         rows = []
-        parser = object.__new__(QuoteSyncService)
         for batch in self._chunks(companies, self.QUOTE_BATCH_SIZE):
             response = self.quotes.quote(",".join(
                 company.upstox_instrument_key for company in batch
             ))
             for response_key, item in (getattr(response, "data", None) or {}).items():
-                parsed = parser._build_quote(str(response_key), item)
+                parsed = self._build_cloud_quote(str(response_key), item)
                 company = by_symbol.get(parsed["symbol"])
                 if company is None or parsed["last_price"] <= 0:
                     continue
