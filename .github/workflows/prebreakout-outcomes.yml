@@ -1,0 +1,78 @@
+name: Pre-breakout durable outcome cycle
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 16:15 IST Monday-Friday (GitHub cron is UTC).
+    - cron: "45 10 * * 1-5"
+
+concurrency:
+  group: prebreakout-outcome-post-market
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate-forward-outcomes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DJANGO_SECRET_KEY: ${{ github.token }}
+      DJANGO_DEBUG: "False"
+      CHANNEL_BACKEND: memory
+      OUTCOME_WORKER_MODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Load masked read-only market token
+        env:
+          CLOUD_SYNC_CONFIG: ${{ secrets.CLOUD_SYNC_CONFIG }}
+        shell: python
+        run: |
+          import json, os
+          from pathlib import Path
+          token = str(json.loads(os.environ["CLOUD_SYNC_CONFIG"]).get("upstox_access_token", "")).strip()
+          if not token:
+              raise SystemExit("CLOUD_SYNC_CONFIG has no Upstox access token")
+          print(f"::add-mask::{token}")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"UPSTOX_ACCESS_TOKEN={token}\n")
+      - name: Apply idempotent Django migrations
+        run: python manage.py migrate --noinput
+      - name: Import and verify optional one-time outcome seed
+        env:
+          OUTCOME_SEED_BUNDLE: ${{ secrets.OUTCOME_SEED_BUNDLE }}
+        shell: python
+        run: |
+          import base64, gzip, hashlib, os, subprocess, sys, tempfile
+          from pathlib import Path
+
+          bundle = str(os.environ.get("OUTCOME_SEED_BUNDLE", "")).strip()
+          if not bundle:
+              print("No one-time outcome seed configured; continuing safely.")
+              raise SystemExit(0)
+          checksum, encoded = bundle.split("\n", 1)
+          payload = gzip.decompress(base64.b64decode(encoded))
+          if hashlib.sha256(payload).hexdigest() != checksum.strip().lower():
+              raise SystemExit("Outcome seed checksum verification failed")
+          with tempfile.TemporaryDirectory() as directory:
+              seed = Path(directory) / "outcomes.json"
+              seed.write_bytes(payload)
+              seed.with_suffix(".json.sha256").write_text(checksum, encoding="ascii")
+              subprocess.run([
+                  sys.executable, "manage.py", "import_prebreakout_cloud_seed",
+                  "--input", str(seed),
+              ], check=True)
+              subprocess.run([
+                  sys.executable, "manage.py", "verify_prebreakout_cloud_seed",
+                  "--input", str(seed),
+              ], check=True)
+      - name: Evaluate persisted snapshots only
+        run: python manage.py run_cloud_outcome_cycle
