@@ -15,6 +15,7 @@ from django.utils import timezone
 from apps.market.models import CloudBenchmarkCandle, CloudDailyCandle, MarketOHLC
 from apps.market.services.benchmark_history_service import BenchmarkHistoryService
 from apps.market.services.daily_history_sync_service import DailyHistorySyncService
+from apps.companies.models import Company
 from apps.scanner.engine.decision_engine import ScanReport, StockSnapshot, StrategyResult
 
 
@@ -141,14 +142,22 @@ class ScanReportCacheService:
 
     @staticmethod
     def latest_aligned_session() -> date:
+        eligible = Company.objects.filter(
+            exchange="NSE", is_active=True,
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+        ).exclude(upstox_instrument_key="")
         if settings.CLOUD_COMPACT_MARKET_DATA:
-            stock_session = CloudDailyCandle.objects.aggregate(latest=Max("session_date"))["latest"]
+            stock_session = CloudDailyCandle.objects.filter(
+                company__in=eligible
+            ).aggregate(latest=Max("session_date"))["latest"]
             benchmark_session = CloudBenchmarkCandle.objects.aggregate(
                 latest=Max("session_date")
             )["latest"]
         else:
             stock_time = MarketOHLC.objects.filter(
-                interval=MarketOHLC.Interval.D1
+                interval=MarketOHLC.Interval.D1,
+                exchange="NSE",
+                symbol__in=eligible.values("symbol"),
             ).exclude(
                 symbol=BenchmarkHistoryService.SYMBOL
             ).aggregate(latest=Max("candle_time"))["latest"]

@@ -60,5 +60,7 @@ jobs:
         run: python manage.py validate_scanner_data_readiness
       - name: Build provider-independent aligned scan reports
         run: python manage.py build_technical_scan_cache
+      - name: Validate generated report coverage
+        run: python manage.py validate_scanner_data_readiness --check-cache
       - name: Dry-run both exact workbook projections
         run: python manage.py publish_workbook_scanners --dry-run

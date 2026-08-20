@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from apps.core.services.workbook_scanner_publisher import (
     DATA_UNAVAILABLE,
@@ -282,6 +284,7 @@ class WorkbookDryRunCommandTests(SimpleTestCase):
         self, load, overlay, publisher, from_file, from_info, authorize
     ):
         reports = [_report()]
+        reports[0].snapshot.provider_timestamp = timezone.now()
         load.return_value = (
             reports,
             {
@@ -297,6 +300,32 @@ class WorkbookDryRunCommandTests(SimpleTestCase):
         from_info.assert_not_called()
         authorize.assert_not_called()
         value = output.getvalue()
-        self.assertIn("TECHNICAL_SCANNER_WORKBOOK_DRY_RUN_SUCCESS", value)
-        self.assertIn("SWING_PREBREAKOUT_DRY_RUN_SUCCESS", value)
+        self.assertIn("TECHNICAL_SCANNER_WORKBOOK_DRY_RUN_RESULT", value)
+        self.assertIn("SWING_PREBREAKOUT_DRY_RUN_RESULT", value)
         self.assertIn("provider_calls=0 sheet_writes=0", value)
+
+    @patch("apps.core.management.commands.publish_workbook_scanners.WorkbookScannerPublisher")
+    @patch("apps.core.management.commands.publish_workbook_scanners.LiveScanOverlayService.overlay_reports")
+    @patch("apps.core.management.commands.publish_workbook_scanners.ScanReportCacheService.load_valid")
+    def test_stale_dry_run_fails_without_constructing_google_publisher(
+        self, load, overlay, publisher
+    ):
+        reports = [_report()]
+        reports[0].snapshot.provider_timestamp = datetime(
+            2026, 8, 19, 4, tzinfo=dt_timezone.utc
+        )
+        load.return_value = (
+            reports,
+            {
+                "scanner_session": "2026-08-19",
+                "cache_generated_at": datetime(
+                    2026, 8, 19, 5, tzinfo=dt_timezone.utc
+                ),
+            },
+        )
+        overlay.return_value = reports
+        with self.assertRaisesMessage(
+            CommandError, "WORKBOOK_SCANNERS_DRY_RUN_NOT_READY freshness=STALE"
+        ):
+            call_command("publish_workbook_scanners", "--dry-run")
+        publisher.assert_not_called()
