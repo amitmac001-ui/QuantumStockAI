@@ -71,3 +71,5 @@ zope.interface==8.5
 numpy==2.5.1
 pandas==3.0.5
 psycopg[binary]>=3.1.12,<4
+google-auth==2.56.0
+gspread==6.2.1

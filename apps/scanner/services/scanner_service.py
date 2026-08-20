@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 from django.conf import settings
+from django.utils import timezone
 
 from apps.companies.models import Company
 from apps.market.indicators.engine import indicator_engine
@@ -19,6 +20,9 @@ from apps.scanner.engine.failed_breakout_features import failed_breakout_feature
 from apps.scanner.engine.overhead_supply_features import overhead_supply_feature_extractor
 from apps.scanner.engine.setup_lifecycle_features import setup_lifecycle_feature_extractor
 from apps.scanner.engine.supply_demand_features import supply_demand_feature_extractor
+from apps.scanner.engine.technical_scanner_features import (
+    technical_scanner_feature_extractor,
+)
 from apps.scanner.engine.data_quality_features import data_quality_gate_v2
 from apps.scanner.engine.decision_engine import ScanReport, scanner_engine
 from apps.scanner.engine.market_context_features import (
@@ -247,6 +251,9 @@ class ScannerService:
         evaluation_time=None,
     ) -> dict[str, Any]:
         enriched_frame, latest = cls._indicator_frame(candles)
+        technical_scanner_fields = technical_scanner_feature_extractor.extract(
+            enriched_frame
+        )
         market_data_timestamp = quote.last_trade_time
         latest_completed_session = (
             DailyHistorySyncService.session_date(benchmark_frame["timestamp"].iloc[-1])
@@ -423,6 +430,8 @@ class ScannerService:
             "timestamp": market_data_timestamp,
             "provider_timestamp": quote.provider_timestamp,
             "last_trade_timestamp": quote.last_trade_time,
+            "calculation_timestamp": evaluation_time or timezone.now(),
+            "technical_scanner_fields": technical_scanner_fields,
             "ema_20": cls._safe_float(latest.get("ema_20", 0.0)),
             "ema_50": cls._safe_float(latest.get("ema_50", 0.0)),
             "ema_100": cls._safe_float(latest.get("ema_100", 0.0)),

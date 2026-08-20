@@ -10,6 +10,7 @@ from apps.market.models import CloudBenchmarkCandle, CloudDailyCandle, CloudQuot
 from apps.market.services.cloud_eod_ingestion_service import CloudEODIngestionService
 from apps.scanner.models import PreBreakoutSetupOutcome
 from apps.scanner.services.prebreakout_outcome_service import PreBreakoutOutcomeService
+from apps.scanner.services.scan_report_cache_service import ScanReportCacheService
 from apps.scanner.services.scanner_service import ScannerService
 
 
@@ -61,6 +62,23 @@ class CloudSnapshotCycleService:
             and benchmark["count"] >= self.MINIMUM_BENCHMARK_SESSIONS
         )
         reports = ScannerService.scan_live_market() if benchmark_ready else []
+        current_reports = [
+            report for report in reports
+            if report.snapshot.latest_daily_session is not None
+            and ScanReportCacheService._session(
+                report.snapshot.latest_daily_session
+            ) == latest
+        ]
+        if current_reports:
+            ScanReportCacheService().save(
+                current_reports,
+                session=latest,
+                session_context={
+                    "scanner_session": latest.isoformat(),
+                    "reports": len(current_reports),
+                    "source": "cloud_snapshot_cycle",
+                },
+            )
         quality_counts: dict[str, int] = {}
         for report in reports:
             state = str(report.snapshot.data_quality_state or "UNKNOWN")
