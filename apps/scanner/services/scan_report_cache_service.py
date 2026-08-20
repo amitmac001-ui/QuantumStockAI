@@ -128,7 +128,7 @@ class ScanReportCacheService:
             raise InvalidScanCache("Unsupported scan cache version.")
         cached_session = self._session(payload.get("session"))
         required_session = self._session(expected_session)
-        context = payload.get("session_context") or {}
+        context = dict(payload.get("session_context") or {})
         if (
             cached_session != required_session
             or self._session(context.get("scanner_session")) != required_session
@@ -136,6 +136,7 @@ class ScanReportCacheService:
             raise InvalidScanCache(
                 f"Stale scan cache: cached={cached_session}, expected={required_session}."
             )
+        context["cache_generated_at"] = payload.get("generated_at")
         return [self._report(item) for item in payload.get("reports", [])], context
 
     @staticmethod
