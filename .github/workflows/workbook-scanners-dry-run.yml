@@ -1,6 +1,13 @@
 name: Workbook scanners dry-run
 
 on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +33,21 @@ jobs:
       GOOGLE_SHEETS_ENABLED: "False"
     steps:
       - uses: actions/checkout@v4
+      - name: Verify required secrets are configured
+        shell: bash
+        run: |
+          missing=()
+          for name in DATABASE_URL UPSTOX_ANALYTICS_TOKEN CLOUD_SYNC_CONFIG; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            echo "Missing required GitHub Actions secrets:"
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "Required GitHub Actions secrets are configured."
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
