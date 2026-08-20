@@ -167,6 +167,9 @@ class StockSnapshot:
     timestamp: Optional[datetime] = None
     provider_timestamp: Optional[datetime] = None
     last_trade_timestamp: Optional[datetime] = None
+    calculation_timestamp: Optional[datetime] = None
+    # Presentation-only causal values; never consumed by scoring/ranking.
+    technical_scanner_fields: dict[str, Any] = field(default_factory=dict)
 
         # ===== Technical Indicators =====
 
@@ -527,6 +530,8 @@ class StockSnapshot:
             timestamp=data.get("timestamp"),
             provider_timestamp=data.get("provider_timestamp"),
             last_trade_timestamp=data.get("last_trade_timestamp"),
+            calculation_timestamp=data.get("calculation_timestamp"),
+            technical_scanner_fields=dict(data.get("technical_scanner_fields") or {}),
 
             ema_20=_safe_float(data.get("ema_20")),
             ema_50=_safe_float(data.get("ema_50")),
