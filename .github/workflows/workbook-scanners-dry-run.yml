@@ -56,6 +56,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run Django system checks
         run: python manage.py check
+      - name: Audit persisted scanner universe (read-only)
+        run: python manage.py audit_scanner_universe
       - name: Validate persisted database and session readiness
         run: python manage.py validate_scanner_data_readiness
       - name: Build provider-independent aligned scan reports
