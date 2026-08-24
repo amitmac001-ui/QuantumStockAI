@@ -146,7 +146,7 @@ class CloudEODIngestionService:
             str(row.get("instrument_key") or "").strip()
             for row in suspended_rows
             if str(row.get("instrument_key") or "").startswith("NSE_EQ|")
-        }
+        }.difference(selected_keys)
         suspended = 0
         if suspended_keys:
             suspended = Company.objects.filter(
