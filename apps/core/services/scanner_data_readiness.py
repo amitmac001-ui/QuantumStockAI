@@ -78,6 +78,7 @@ class ScannerDataReadinessService:
             exchange="NSE",
             is_active=True,
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            series="EQ",
         ).exclude(upstox_instrument_key="")
 
     @classmethod

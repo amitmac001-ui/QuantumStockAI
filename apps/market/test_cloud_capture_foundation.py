@@ -98,11 +98,13 @@ class CloudCompactPersistenceTests(TestCase):
         self.active = Company.objects.create(
             symbol="ACTIVE", exchange="NSE", name="Active", isin="INE000000001",
             upstox_instrument_key="NSE_EQ|ACTIVE", is_active=True,
+            series="EQ",
             instrument_status=Company.InstrumentStatus.ACTIVE,
         )
         self.suspended = Company.objects.create(
             symbol="SUSP", exchange="NSE", name="Suspended", isin="INE000000002",
             upstox_instrument_key="NSE_EQ|SUSP", is_active=False,
+            series="EQ",
             instrument_status=Company.InstrumentStatus.SUSPENDED,
         )
 
@@ -129,6 +131,24 @@ class CloudCompactPersistenceTests(TestCase):
         result = self.service([]).sync_stock_history(date(2026, 8, 7), limit=10)
         self.assertEqual(result["empty"], 1)
         self.assertEqual(CloudDailyCandle.objects.count(), 0)
+
+
+    def test_full_seed_persists_compact_three_year_high_summary(self):
+        sessions = pd.bdate_range(end="2026-08-07", periods=500)
+        rows = [
+            [
+                session.isoformat(), 100, 100 + index / 10, 99, 100,
+                1_000, 0,
+            ]
+            for index, session in enumerate(sessions)
+        ]
+        self.service(rows).sync_stock_history(date(2026, 8, 7), limit=10)
+        self.active.refresh_from_db()
+        self.assertEqual(self.active.three_year_observations, 500)
+        self.assertEqual(float(self.active.three_year_high), 149.9)
+        self.assertEqual(
+            self.active.three_year_high_session, sessions[-1].date()
+        )
 
     def test_session_normalization_and_duplicate_key(self):
         clean = self.service([]).history._clean_frame(

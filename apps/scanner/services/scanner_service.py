@@ -92,6 +92,7 @@ class ScannerService:
         queryset = Company.objects.filter(
             is_active=True,
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            series="EQ",
         ).only(
             "symbol",
             "exchange",
@@ -99,6 +100,9 @@ class ScannerService:
             "sector",
             "industry",
             "market_cap",
+            "three_year_high",
+            "three_year_high_session",
+            "three_year_observations",
         )
 
         for company in queryset.iterator(chunk_size=2_000):
@@ -427,6 +431,9 @@ class ScannerService:
             "week_52_high": week_52_high,
             "week_52_low": week_52_low,
             "liquidity_score": liquidity_score,
+            "three_year_high": cls._safe_float(company.three_year_high) if company else 0.0,
+            "three_year_high_session": company.three_year_high_session if company else None,
+            "three_year_observations": company.three_year_observations if company else 0,
             "timestamp": market_data_timestamp,
             "provider_timestamp": quote.provider_timestamp,
             "last_trade_timestamp": quote.last_trade_time,

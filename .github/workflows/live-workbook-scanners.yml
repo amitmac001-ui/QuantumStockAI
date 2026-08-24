@@ -1,0 +1,57 @@
+name: Live workbook scanners
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:15-15:25 IST, every five minutes, Monday-Friday.
+    - cron: "45-59/5 3 * * 1-5"
+    - cron: "0-55/5 4-9 * * 1-5"
+
+concurrency:
+  group: live-workbook-scanners
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-live-scanners:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}
+      CLOUD_SYNC_CONFIG: ${{ secrets.CLOUD_SYNC_CONFIG }}
+      DJANGO_SECRET_KEY: ${{ github.token }}
+      DJANGO_DEBUG: "False"
+      CHANNEL_BACKEND: memory
+      OUTCOME_WORKER_MODE: "1"
+      CLOUD_COMPACT_MARKET_DATA: "1"
+      GOOGLE_SHEETS_ENABLED: "True"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          missing=()
+          for name in DATABASE_URL UPSTOX_ANALYTICS_TOKEN CLOUD_SYNC_CONFIG; do
+            if [[ -z "${!name:-}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} )); then
+            printf 'Missing secret: %s\n' "${missing[@]}"
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python manage.py migrate --noinput
+      - name: Refresh live EQ quotes
+        run: python manage.py refresh_scanner_quotes
+      - name: Require complete aligned EOD inputs
+        run: python manage.py validate_scanner_data_readiness
+      - name: Rebuild scanner cache with live quote overlay
+        run: python manage.py build_technical_scan_cache
+      - name: Publish both live scanner tabs
+        run: python manage.py publish_workbook_scanners --write

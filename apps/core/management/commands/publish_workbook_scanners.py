@@ -36,14 +36,14 @@ class Command(BaseCommand):
                 if options["dry_run"]:
                     self.stdout.write(self.style.SUCCESS(
                         "TECHNICAL_SCANNER_WORKBOOK_DRY_RUN_RESULT "
-                        f"rows={len(report_set.technical_rows)} columns=50 "
+                        f"rows={len(report_set.technical_rows)} columns=51 "
                         f"unavailable={report_set.unavailable_count(report_set.technical_rows)} "
                         f"session={session} freshness={report_set.freshness()} "
                         f"cache_generated_at={generated_at}"
                     ))
                     self.stdout.write(self.style.SUCCESS(
                         "SWING_PREBREAKOUT_DRY_RUN_RESULT "
-                        f"rows={len(report_set.swing_rows)} columns=40 "
+                        f"rows={len(report_set.swing_rows)} columns=41 "
                         f"unavailable={report_set.unavailable_count(report_set.swing_rows)} "
                         f"session={session} freshness={report_set.freshness()} "
                         f"cache_generated_at={generated_at}"

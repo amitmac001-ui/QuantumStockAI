@@ -59,7 +59,7 @@ class CloudEODIngestionService:
     )
     STOCK_RETENTION_SESSIONS = 272
     BENCHMARK_RETENTION_SESSIONS = 300
-    INITIAL_CALENDAR_DAYS = 430
+    INITIAL_CALENDAR_DAYS = 1_150
     HISTORY_BATCH_LIMIT = 500
     QUOTE_BATCH_SIZE = 200
     WRITE_BATCH_SIZE = 5_000
@@ -84,7 +84,6 @@ class CloudEODIngestionService:
     def refresh_instrument_mapping(self) -> tuple[int, int]:
         active_rows = self._download_json_gzip(self.NSE_INSTRUMENTS_URL)
         suspended_rows = self._download_json_gzip(self.SUSPENDED_INSTRUMENTS_URL)
-        priorities = {"EQ": 0, "BE": 1, "BZ": 2, "SM": 3, "ST": 4}
         selected: dict[str, dict[str, Any]] = {}
         for row in active_rows:
             if row.get("segment") != "NSE_EQ":
@@ -93,13 +92,10 @@ class CloudEODIngestionService:
             isin = str(row.get("isin") or "").strip().upper()
             instrument_key = str(row.get("instrument_key") or "").strip()
             instrument_type = str(row.get("instrument_type") or "").strip().upper()
-            if not symbol or not isin or not instrument_key:
+            # Scanner universe is normal NSE cash equity only.
+            if instrument_type != "EQ" or not symbol or not isin or not instrument_key:
                 continue
-            current = selected.get(symbol)
-            if current is None or priorities.get(instrument_type, 99) < priorities.get(
-                str(current.get("instrument_type") or "").upper(), 99
-            ):
-                selected[symbol] = row
+            selected[symbol] = row
 
         if len(selected) < 1_000:
             raise RuntimeError("Upstox NSE instrument master is unexpectedly incomplete.")
@@ -223,8 +219,11 @@ class CloudEODIngestionService:
         companies = list(Company.objects.filter(
             exchange="NSE", is_active=True,
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            series="EQ",
         ).exclude(upstox_instrument_key="").only(
-            "id", "symbol", "exchange", "upstox_instrument_key"
+            "id", "symbol", "exchange", "upstox_instrument_key",
+            "three_year_high", "three_year_high_session",
+            "three_year_window_start", "three_year_observations",
         ).order_by("symbol"))
         latest_map = dict(CloudDailyCandle.objects.values_list("company_id").annotate(
             latest=Max("session_date")
@@ -234,6 +233,7 @@ class CloudEODIngestionService:
         counters = {"attempted": 0, "current": len(companies) - len(pending), "updated": 0,
                     "created": 0, "rows_updated": 0, "empty": 0, "failed": 0}
         buffer: list[CloudDailyCandle] = []
+        high_summaries: list[Company] = []
         for company in processable:
             counters["attempted"] += 1
             start = (
@@ -249,6 +249,20 @@ class CloudEODIngestionService:
                     counters["empty"] += 1
                     continue
                 buffer.extend(self._stock_objects(company, clean))
+                highest_index = clean["high"].idxmax()
+                candidate_high = self._decimal(clean.loc[highest_index, "high"])
+                candidate_session = clean.loc[highest_index, "session_date"]
+                if (
+                    company.three_year_high is None
+                    or candidate_high >= company.three_year_high
+                    or len(clean) >= 500
+                ):
+                    company.three_year_high = candidate_high
+                    company.three_year_high_session = candidate_session
+                if len(clean) >= 500:
+                    company.three_year_window_start = clean["session_date"].min()
+                    company.three_year_observations = len(clean)
+                high_summaries.append(company)
                 counters["updated"] += 1
                 if len(buffer) >= self.WRITE_BATCH_SIZE:
                     created, updated = self._flush_stock_rows(buffer)
@@ -260,6 +274,15 @@ class CloudEODIngestionService:
         created, updated = self._flush_stock_rows(buffer)
         counters["created"] += created
         counters["rows_updated"] += updated
+        if high_summaries:
+            Company.objects.bulk_update(
+                high_summaries,
+                [
+                    "three_year_high", "three_year_high_session",
+                    "three_year_window_start", "three_year_observations",
+                ],
+                batch_size=1_000,
+            )
         return counters
 
     def sync_benchmark(self, latest_session: date) -> int:
@@ -351,6 +374,7 @@ class CloudEODIngestionService:
         companies = list(Company.objects.filter(
             exchange="NSE", is_active=True,
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            series="EQ",
         ).exclude(upstox_instrument_key="").only(
             "id", "symbol", "upstox_instrument_key"
         ))

@@ -93,6 +93,7 @@ class ScannerReadinessDistinctCountTests(TestCase):
             name=symbol,
             upstox_instrument_key=f"NSE_EQ|{symbol}",
             is_active=active,
+            series="EQ",
             instrument_status=(
                 Company.InstrumentStatus.ACTIVE
                 if active else Company.InstrumentStatus.INACTIVE

@@ -159,6 +159,27 @@ def _primary_pattern(stock: Any):
     return DATA_UNAVAILABLE
 
 
+def _multi_year_breakout(stock: Any):
+    high = _attr(stock, "three_year_high")
+    price = _attr(stock, "last_price")
+    observations = int(_attr(stock, "three_year_observations", 0) or 0)
+    try:
+        high_value = float(high)
+        price_value = float(price)
+    except (TypeError, ValueError):
+        return DATA_UNAVAILABLE
+    if observations < 500 or high_value <= 0 or price_value <= 0:
+        return DATA_UNAVAILABLE
+    distance = ((high_value - price_value) / high_value) * 100.0
+    if distance <= -0.3:
+        return f"3Y BREAKOUT ({abs(distance):.2f}% ABOVE)"
+    if distance <= 0:
+        return f"AT 3Y HIGH ({abs(distance):.2f}% ABOVE)"
+    if distance <= 5.0:
+        return f"NEAR 3Y HIGH ({distance:.2f}% BELOW)"
+    return "NOT NEAR"
+
+
 class TechnicalScannerWorkbookProjection:
     HEADERS = (
         "Company", "Ticker", "Price", "Updated At", "20 SMA", "Cross 20 SMA",
@@ -171,6 +192,7 @@ class TechnicalScannerWorkbookProjection:
         "ATR 14", "ADX 14", "VCP", "Flat Base", "Cup & Handle",
         "Double Bottom", "Ascending Triangle", "Bull Flag", "Darvas Box",
         "Head & Shoulders", "Pattern Score", "Data Status", "Source", "Notes",
+        "Multi-Year Breakout",
     )
 
     @classmethod
@@ -230,6 +252,7 @@ class TechnicalScannerWorkbookProjection:
                     _attr(stock, "data_quality_reason_codes", []),
                     _attr(stock, "setup_risk_flags", []),
                 ),
+                "Multi-Year Breakout": _multi_year_breakout(stock),
             }
             for period in (20, 50, 100, 200):
                 mapping[f"{period} SMA"] = _display(technical.get(f"sma_{period}"))
@@ -241,8 +264,8 @@ class TechnicalScannerWorkbookProjection:
                     technical.get(f"ema_{period}_bullish_cross")
                 )
             row = [mapping[header] for header in cls.HEADERS]
-            if len(row) != 50:
-                raise ValueError(f"Technical Scanner schema mismatch: {len(row)}/50")
+            if len(row) != 51:
+                raise ValueError(f"Technical Scanner schema mismatch: {len(row)}/51")
             output.append(row)
         return output
 
@@ -258,7 +281,7 @@ class SwingPrebreakoutProjection:
         "Volume Dry-Up", "Volume Expansion Trigger", "Latest Order Catalyst",
         "Order Value ₹ Cr", "Latest Result", "Result Strength",
         "Corporate Catalyst", "Risk Flags", "Why Ranked", "Trigger Needed",
-        "Invalidation", "Data Status", "Updated At",
+        "Invalidation", "Data Status", "Updated At", "Multi-Year Breakout",
     )
 
     @staticmethod
@@ -333,10 +356,11 @@ class SwingPrebreakoutProjection:
                 "Invalidation": risk_flags,
                 "Data Status": _data_status(stock, now),
                 "Updated At": _display(_first_present(_quote_time(stock), _attr(stock, "calculation_timestamp"))),
+                "Multi-Year Breakout": _multi_year_breakout(stock),
             }
             row = [mapping[header] for header in cls.HEADERS]
-            if len(row) != 40:
-                raise ValueError(f"Swing Prebreakout schema mismatch: {len(row)}/40")
+            if len(row) != 41:
+                raise ValueError(f"Swing Prebreakout schema mismatch: {len(row)}/41")
             output.append(row)
         return output
 

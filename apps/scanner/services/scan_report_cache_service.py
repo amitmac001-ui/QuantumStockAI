@@ -145,6 +145,7 @@ class ScanReportCacheService:
         eligible = Company.objects.filter(
             exchange="NSE", is_active=True,
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            series="EQ",
         ).exclude(upstox_instrument_key="")
         if settings.CLOUD_COMPACT_MARKET_DATA:
             stock_session = CloudDailyCandle.objects.filter(

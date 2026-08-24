@@ -34,6 +34,7 @@ TECHNICAL_HEADERS = (
     "ATR 14", "ADX 14", "VCP", "Flat Base", "Cup & Handle",
     "Double Bottom", "Ascending Triangle", "Bull Flag", "Darvas Box",
     "Head & Shoulders", "Pattern Score", "Data Status", "Source", "Notes",
+    "Multi-Year Breakout",
 )
 
 SWING_HEADERS = (
@@ -47,6 +48,7 @@ SWING_HEADERS = (
     "Order Value ₹ Cr", "Latest Result", "Result Strength",
     "Corporate Catalyst", "Risk Flags", "Why Ranked", "Trigger Needed",
     "Invalidation", "Data Status", "Updated At",
+    "Multi-Year Breakout",
 )
 
 
@@ -105,6 +107,8 @@ def _report(symbol="AAA", *, price=125.5):
         latest_daily_session=date(2026, 8, 20), data_quality_state="FRESH",
         technical_scanner_fields=technical,
         rs_1m_pct=3.0, rs_3m_pct=8.0, rs_6m_pct=15.0, rs_12m_pct=25.0,
+        three_year_high=130.0, three_year_high_session=date(2025, 7, 15),
+        three_year_observations=720,
         rs_trend_status="LEADING", vcp_detected=True, flat_base=False,
         ascending_triangle=False, darvas_consolidation=False,
         base_quality_score=82, breakout_level=128.0,
@@ -130,8 +134,8 @@ class WorkbookProjectionTests(SimpleTestCase):
     def test_exact_header_contracts(self):
         self.assertEqual(TechnicalScannerWorkbookProjection.HEADERS, TECHNICAL_HEADERS)
         self.assertEqual(SwingPrebreakoutProjection.HEADERS, SWING_HEADERS)
-        self.assertEqual(len(TECHNICAL_HEADERS), 50)
-        self.assertEqual(len(SWING_HEADERS), 40)
+        self.assertEqual(len(TECHNICAL_HEADERS), 51)
+        self.assertEqual(len(SWING_HEADERS), 41)
 
     def test_representative_field_mappings(self):
         now = datetime(2026, 8, 21, 4, 1, tzinfo=dt_timezone.utc)
@@ -147,6 +151,10 @@ class WorkbookProjectionTests(SimpleTestCase):
         self.assertEqual(_value(SWING_HEADERS, swing, "20/50/200 MA Trend"), "20:ABOVE | 50:ABOVE | 200:ABOVE")
         self.assertEqual(_value(SWING_HEADERS, swing, "Volume Dry-Up"), "YES")
 
+        self.assertEqual(
+            _value(SWING_HEADERS, swing, "Multi-Year Breakout"),
+            "NEAR 3Y HIGH (3.46% BELOW)",
+        )
     def test_unavailable_not_supported_and_no_fake_zeroes(self):
         report = _report(price=0)
         report.snapshot.technical_scanner_fields = {}
@@ -198,8 +206,8 @@ class WorkbookProjectionTests(SimpleTestCase):
 class WorkbookPublisherSafetyTests(SimpleTestCase):
     @staticmethod
     def _report_set(rows=1):
-        technical = [[DATA_UNAVAILABLE] * 50 for _ in range(rows)]
-        swing = [[DATA_UNAVAILABLE] * 40 for _ in range(rows)]
+        technical = [[DATA_UNAVAILABLE] * 51 for _ in range(rows)]
+        swing = [[DATA_UNAVAILABLE] * 41 for _ in range(rows)]
         status = TECHNICAL_HEADERS.index("Data Status")
         for row in technical:
             row[status] = "OK"
