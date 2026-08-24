@@ -118,6 +118,52 @@ class CloudCompactPersistenceTests(TestCase):
             now=datetime(2026, 8, 7, 17, tzinfo=ZoneInfo("Asia/Kolkata")),
         )
 
+    def test_current_active_master_wins_over_overlapping_suspended_feed(self):
+        active_rows = [
+            {
+                "segment": "NSE_EQ",
+                "name": "Active",
+                "isin": self.active.isin,
+                "instrument_type": "EQ",
+                "instrument_key": self.active.upstox_instrument_key,
+                "trading_symbol": self.active.symbol,
+            }
+        ]
+        active_rows.extend(
+            {
+                "segment": "NSE_EQ",
+                "name": f"Company {index}",
+                "isin": f"INTEST{index:06d}",
+                "instrument_type": "EQ",
+                "instrument_key": f"NSE_EQ|INTEST{index:06d}",
+                "trading_symbol": f"EQ{index:04d}",
+            }
+            for index in range(999)
+        )
+        suspended_rows = [
+            {"instrument_key": self.active.upstox_instrument_key},
+            {"instrument_key": self.suspended.upstox_instrument_key},
+        ]
+        service = self.service([])
+        service._download_json_gzip = Mock(
+            side_effect=[active_rows, suspended_rows]
+        )
+
+        active_count, suspended_count = service.refresh_instrument_mapping()
+
+        self.active.refresh_from_db()
+        self.suspended.refresh_from_db()
+        self.assertEqual(active_count, 1_000)
+        self.assertEqual(suspended_count, 1)
+        self.assertTrue(self.active.is_active)
+        self.assertEqual(
+            self.active.instrument_status, Company.InstrumentStatus.ACTIVE
+        )
+        self.assertFalse(self.suspended.is_active)
+        self.assertEqual(
+            self.suspended.instrument_status, Company.InstrumentStatus.SUSPENDED
+        )
+
     def test_incremental_history_excludes_suspended_and_is_idempotent(self):
         service = self.service([self.row()])
         first = service.sync_stock_history(date(2026, 8, 7), limit=10)
