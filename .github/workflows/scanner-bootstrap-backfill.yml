@@ -1,0 +1,62 @@
+name: One-time scanner bootstrap backfill
+
+on:
+  push:
+    branches:
+      - codex/scanner-bootstrap-backfill
+
+concurrency:
+  group: prebreakout-outcome-post-market
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backfill-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}
+      CLOUD_SYNC_CONFIG: ${{ secrets.CLOUD_SYNC_CONFIG }}
+      DJANGO_SECRET_KEY: ${{ github.token }}
+      DJANGO_DEBUG: "False"
+      CHANNEL_BACKEND: memory
+      OUTCOME_WORKER_MODE: "1"
+      CLOUD_COMPACT_MARKET_DATA: "1"
+      GOOGLE_SHEETS_ENABLED: "True"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          missing=()
+          for name in DATABASE_URL UPSTOX_ANALYTICS_TOKEN CLOUD_SYNC_CONFIG; do
+            if [[ -z "${!name:-}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} )); then
+            printf 'Missing secret: %s\n' "${missing[@]}"
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python manage.py migrate --noinput
+      - name: Complete sequential EOD bootstrap batches
+        shell: bash
+        run: |
+          for batch in 1 2 3 4 5 6; do
+            echo "Starting bootstrap batch ${batch}/6"
+            python manage.py run_cloud_snapshot_cycle --history-limit 500
+          done
+      - name: Refresh final live EQ quote overlay
+        run: python manage.py refresh_scanner_quotes
+      - name: Require complete aligned scanner inputs
+        run: python manage.py validate_scanner_data_readiness
+      - name: Build aligned live scanner cache
+        run: python manage.py build_technical_scan_cache
+      - name: Publish both live scanner tabs
+        run: python manage.py publish_workbook_scanners --write
