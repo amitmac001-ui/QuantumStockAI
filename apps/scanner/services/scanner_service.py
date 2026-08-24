@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 from django.conf import settings
+from django.db import connection
 from django.utils import timezone
 
 from apps.companies.models import Company
@@ -89,17 +90,31 @@ class ScannerService:
     @classmethod
     def _load_company_map(cls) -> dict[tuple[str, str], Company]:
         companies: dict[tuple[str, str], Company] = {}
+        only_fields = [
+            "symbol", "exchange", "name", "sector", "industry", "market_cap",
+        ]
+        summary_fields = {
+            "three_year_high",
+            "three_year_high_session",
+            "three_year_observations",
+        }
+        try:
+            with connection.cursor() as cursor:
+                columns = {
+                    item.name
+                    for item in connection.introspection.get_table_description(
+                        cursor, Company._meta.db_table
+                    )
+                }
+        except Exception:
+            columns = set()
+        if summary_fields <= columns:
+            only_fields.extend(sorted(summary_fields))
         queryset = Company.objects.filter(
             is_active=True,
             instrument_status=Company.InstrumentStatus.ACTIVE,
-        ).only(
-            "symbol",
-            "exchange",
-            "name",
-            "sector",
-            "industry",
-            "market_cap",
-        )
+            series="EQ",
+        ).only(*only_fields)
 
         for company in queryset.iterator(chunk_size=2_000):
             key = cls._key(company.symbol, company.exchange)
@@ -427,6 +442,15 @@ class ScannerService:
             "week_52_high": week_52_high,
             "week_52_low": week_52_low,
             "liquidity_score": liquidity_score,
+            "three_year_high": cls._safe_float(
+                company.__dict__.get("three_year_high")
+            ) if company else 0.0,
+            "three_year_high_session": (
+                company.__dict__.get("three_year_high_session") if company else None
+            ),
+            "three_year_observations": (
+                company.__dict__.get("three_year_observations", 0) if company else 0
+            ),
             "timestamp": market_data_timestamp,
             "provider_timestamp": quote.provider_timestamp,
             "last_trade_timestamp": quote.last_trade_time,

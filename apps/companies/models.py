@@ -70,6 +70,15 @@ class Company(models.Model):
         null=True,
         blank=True,
     )
+    # Compact prior-session three-year high summary. The scanner needs the
+    # breakout reference, not three years of cloud candle rows per company.
+    three_year_high = models.DecimalField(
+        max_digits=20, decimal_places=4, null=True, blank=True
+    )
+    three_year_high_session = models.DateField(null=True, blank=True)
+    three_year_window_start = models.DateField(null=True, blank=True)
+    three_year_observations = models.PositiveIntegerField(default=0)
+
 
     face_value = models.DecimalField(
         max_digits=10,

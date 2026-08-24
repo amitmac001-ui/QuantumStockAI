@@ -1,0 +1,68 @@
+name: Workbook scanners dry-run
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+concurrency:
+  group: workbook-scanners-dry-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}
+      CLOUD_SYNC_CONFIG: ${{ secrets.CLOUD_SYNC_CONFIG }}
+      DJANGO_SECRET_KEY: ${{ github.token }}
+      DJANGO_DEBUG: "False"
+      CHANNEL_BACKEND: memory
+      OUTCOME_WORKER_MODE: "1"
+      CLOUD_COMPACT_MARKET_DATA: "1"
+      GOOGLE_SHEETS_ENABLED: "False"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify required secrets are configured
+        shell: bash
+        run: |
+          missing=()
+          for name in DATABASE_URL UPSTOX_ANALYTICS_TOKEN CLOUD_SYNC_CONFIG; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            echo "Missing required GitHub Actions secrets:"
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "Required GitHub Actions secrets are configured."
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Run Django system checks
+        run: python manage.py check
+      - name: Audit persisted scanner universe (read-only)
+        run: python manage.py audit_scanner_universe
+      - name: Validate persisted database and session readiness
+        run: python manage.py validate_scanner_data_readiness
+      - name: Build provider-independent aligned scan reports
+        run: python manage.py build_technical_scan_cache
+      - name: Validate generated report coverage
+        run: python manage.py validate_scanner_data_readiness --check-cache
+      - name: Dry-run both exact workbook projections
+        run: python manage.py publish_workbook_scanners --dry-run

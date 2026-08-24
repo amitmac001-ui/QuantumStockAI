@@ -153,6 +153,9 @@ class StockSnapshot:
 
     week_52_high: float = 0.0
     week_52_low: float = 0.0
+    three_year_high: float | None = None
+    three_year_high_session: Any = None
+    three_year_observations: int = 0
     atr: float = 0.0
     atr_pct: float | None = None
     atr_contraction_ratio: float | None = None
@@ -515,6 +518,9 @@ class StockSnapshot:
             dma_200=_safe_float(data.get("dma_200")),
             week_52_high=_safe_float(data.get("week_52_high")),
             week_52_low=_safe_float(data.get("week_52_low")),
+            three_year_high=_optional_float(data.get("three_year_high")),
+            three_year_high_session=data.get("three_year_high_session"),
+            three_year_observations=_safe_int(data.get("three_year_observations")),
             atr=_safe_float(data.get("atr")),
             atr_pct=_optional_float(data.get("atr_pct")),
             atr_contraction_ratio=_optional_float(
