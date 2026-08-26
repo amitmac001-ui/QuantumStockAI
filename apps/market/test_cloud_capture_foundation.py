@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.companies.models import Company
@@ -13,6 +13,7 @@ from apps.market.providers.historical_client import HistoricalClient
 from apps.market.providers.upstox_client import UpstoxClient
 from apps.market.services.cloud_eod_ingestion_service import CloudEODIngestionService
 from apps.scanner.models import PreBreakoutSetupOutcome
+from apps.scanner.services.cloud_snapshot_cycle_service import CloudSnapshotCycleService
 from apps.scanner.services.prebreakout_outcome_service import PreBreakoutOutcomeService
 from apps.upstox_auth.services.read_only_credential_service import ReadOnlyCredentialService
 
@@ -173,6 +174,27 @@ class CloudCompactPersistenceTests(TestCase):
         self.assertEqual(service.historical.calls, ["NSE_EQ|ACTIVE"])
         self.assertEqual(CloudDailyCandle.objects.count(), 1)
 
+    def test_incremental_history_prioritizes_the_stalest_company(self):
+        older = Company.objects.create(
+            symbol="OLDER", exchange="NSE", name="Older",
+            isin="INE000000003", upstox_instrument_key="NSE_EQ|OLDER",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+        )
+        CloudDailyCandle.objects.create(
+            company=self.active, session_date=date(2026, 8, 6),
+            open=100, high=105, low=99, close=103, volume=1000,
+        )
+        CloudDailyCandle.objects.create(
+            company=older, session_date=date(2026, 8, 1),
+            open=100, high=105, low=99, close=103, volume=1000,
+        )
+        service = self.service([self.row()])
+
+        service.sync_stock_history(date(2026, 8, 7), limit=1)
+
+        self.assertEqual(service.historical.calls, ["NSE_EQ|OLDER"])
+
     def test_empty_response_never_fabricates_a_candle(self):
         result = self.service([]).sync_stock_history(date(2026, 8, 7), limit=10)
         self.assertEqual(result["empty"], 1)
@@ -261,3 +283,19 @@ class CloudCompactPersistenceTests(TestCase):
         from apps.market.services.benchmark_history_service import BenchmarkHistoryService
         frame = BenchmarkHistoryService.load_ohlcv_frame()
         self.assertEqual(frame.iloc[-1]["timestamp"], date(2026, 8, 7))
+
+
+class CloudSnapshotDatabaseReconnectTests(SimpleTestCase):
+    @patch("apps.scanner.services.cloud_snapshot_cycle_service.close_old_connections")
+    @patch("apps.scanner.services.cloud_snapshot_cycle_service.connection.close")
+    def test_database_phase_reconnects_and_retries_once(
+        self, close_connection, close_old_connections
+    ):
+        callback = Mock(side_effect=[OperationalError("stale connection"), "ok"])
+
+        result = CloudSnapshotCycleService._database_phase(callback)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(callback.call_count, 2)
+        close_connection.assert_called_once_with()
+        self.assertEqual(close_old_connections.call_count, 2)
