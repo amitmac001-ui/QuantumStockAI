@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from django.db import connection
+from django.db import OperationalError, close_old_connections, connection
 from django.db.models import Count, Max
 
 from apps.companies.models import Company
@@ -40,6 +40,17 @@ class CloudSnapshotCycleService:
     MINIMUM_BENCHMARK_SESSIONS = 252
 
     @staticmethod
+    def _database_phase(callback):
+        """Run an idempotent DB phase with one forced reconnect retry."""
+        close_old_connections()
+        try:
+            return callback()
+        except OperationalError:
+            connection.close()
+            close_old_connections()
+            return callback()
+
+    @staticmethod
     def _database_bytes():
         if connection.vendor != "postgresql":
             return None
@@ -50,18 +61,28 @@ class CloudSnapshotCycleService:
     def run(self, *, history_limit: int = 500) -> CloudSnapshotCycleResult:
         ingestion = CloudEODIngestionService().run(history_limit=history_limit)
         latest = ingestion.latest_session
-        current_histories = CloudDailyCandle.objects.filter(
-            session_date=latest
-        ).values("company_id").distinct().count()
-        benchmark = CloudBenchmarkCandle.objects.aggregate(
-            count=Count("id"), latest=Max("session_date")
+
+        def load_alignment_state():
+            return (
+                CloudDailyCandle.objects.filter(session_date=latest)
+                .values("company_id").distinct().count(),
+                CloudBenchmarkCandle.objects.aggregate(
+                    count=Count("id"), latest=Max("session_date")
+                ),
+                CloudQuoteSnapshot.objects.count(),
+            )
+
+        current_histories, benchmark, quote_rows = self._database_phase(
+            load_alignment_state
         )
-        quote_rows = CloudQuoteSnapshot.objects.count()
         benchmark_ready = bool(
             latest and benchmark["latest"] == latest
             and benchmark["count"] >= self.MINIMUM_BENCHMARK_SESSIONS
         )
-        reports = ScannerService.scan_live_market() if benchmark_ready else []
+        reports = (
+            self._database_phase(ScannerService.scan_live_market)
+            if benchmark_ready else []
+        )
         current_reports = [
             report for report in reports
             if report.snapshot.latest_daily_session is not None
@@ -70,26 +91,37 @@ class CloudSnapshotCycleService:
             ) == latest
         ]
         if current_reports:
-            ScanReportCacheService().save(
-                current_reports,
-                session=latest,
-                session_context={
-                    "scanner_session": latest.isoformat(),
-                    "reports": len(current_reports),
-                    "source": "cloud_snapshot_cycle",
-                },
+            self._database_phase(
+                lambda: ScanReportCacheService().save(
+                    current_reports,
+                    session=latest,
+                    session_context={
+                        "scanner_session": latest.isoformat(),
+                        "reports": len(current_reports),
+                        "source": "cloud_snapshot_cycle",
+                    },
+                )
             )
         quality_counts: dict[str, int] = {}
         for report in reports:
             state = str(report.snapshot.data_quality_state or "UNKNOWN")
             quality_counts[state] = quality_counts.get(state, 0) + 1
-        capture = PreBreakoutOutcomeService.capture(reports, latest) if reports else None
-        evaluation = PreBreakoutOutcomeService.evaluate_pending()
-        active = Company.objects.filter(
-            exchange="NSE", is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
-            series="EQ",
-        ).exclude(upstox_instrument_key="").count()
+        capture = (
+            self._database_phase(
+                lambda: PreBreakoutOutcomeService.capture(reports, latest)
+            )
+            if reports else None
+        )
+        evaluation = self._database_phase(
+            PreBreakoutOutcomeService.evaluate_pending
+        )
+        active = self._database_phase(
+            lambda: Company.objects.filter(
+                exchange="NSE", is_active=True,
+                instrument_status=Company.InstrumentStatus.ACTIVE,
+                series="EQ",
+            ).exclude(upstox_instrument_key="").count()
+        )
         fully_attempted = current_histories + ingestion.provider_empty + ingestion.provider_failed >= active
         if benchmark_ready and current_histories >= active:
             status = "HEALTHY"
@@ -110,7 +142,9 @@ class CloudSnapshotCycleService:
             already_recorded=capture.already_recorded if capture else 0,
             evaluated=evaluation.evaluated,
             completed=evaluation.completed,
-            outcomes_total=PreBreakoutSetupOutcome.objects.count(),
-            database_bytes=self._database_bytes(),
+            outcomes_total=self._database_phase(
+                PreBreakoutSetupOutcome.objects.count
+            ),
+            database_bytes=self._database_phase(self._database_bytes),
             ingestion=ingestion.as_mapping(),
         )
