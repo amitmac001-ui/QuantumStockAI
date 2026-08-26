@@ -228,7 +228,17 @@ class CloudEODIngestionService:
         latest_map = dict(CloudDailyCandle.objects.values_list("company_id").annotate(
             latest=Max("session_date")
         ).values_list("company_id", "latest"))
-        pending = [company for company in companies if latest_map.get(company.id) != latest_session]
+        pending = [
+            company for company in companies
+            if latest_map.get(company.id) != latest_session
+        ]
+        # Always advance the stalest/missing instruments first. Symbol ordering
+        # alone repeatedly refreshed the same first 500 names whenever a new
+        # session opened, so full-universe coverage could never catch up.
+        pending.sort(key=lambda company: (
+            latest_map.get(company.id) or date.min,
+            company.symbol,
+        ))
         processable = pending[: (limit or self.HISTORY_BATCH_LIMIT)]
         counters = {"attempted": 0, "current": len(companies) - len(pending), "updated": 0,
                     "created": 0, "rows_updated": 0, "empty": 0, "failed": 0}

@@ -3,8 +3,9 @@ name: Pre-breakout durable outcome cycle
 on:
   workflow_dispatch:
   schedule:
-    # 16:15 IST Monday-Friday (GitHub cron is UTC).
+    # Catch up the full NSE EQ universe after the close. GitHub cron is UTC.
     - cron: "45 10 * * 1-5"
+    - cron: "5,25,45 11-13 * * 1-5"
 
 concurrency:
   group: prebreakout-outcome-post-market
