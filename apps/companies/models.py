@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import models
+from django.db import connection, models
 
 
 class Company(models.Model):
@@ -177,12 +177,36 @@ class Company(models.Model):
         )
 
     @classmethod
+    def persisted_database_columns(cls) -> frozenset[str]:
+        """Return the columns currently available without assuming migrations ran."""
+        try:
+            with connection.cursor() as cursor:
+                description = connection.introspection.get_table_description(
+                    cursor, cls._meta.db_table
+                )
+        except Exception:
+            return frozenset()
+        return frozenset(column.name for column in description)
+
+    @classmethod
     def scanner_eligible(cls):
-        return cls.objects.filter(
+        base = cls.objects.filter(
             exchange="NSE",
             is_active=True,
             instrument_status=cls.InstrumentStatus.ACTIVE,
+        ).exclude(upstox_instrument_key="")
+        classification_columns = {
+            "provider_segment",
+            "provider_security_type",
+            "security_category",
+        }
+        if not classification_columns.issubset(cls.persisted_database_columns()):
+            # Pull-request diagnostics deliberately use the shared database in a
+            # read-only mode. Until its migration is applied, retain the prior,
+            # narrow NSE EQ rule instead of querying columns that do not exist.
+            return base.filter(series="EQ")
+        return base.filter(
             provider_segment="NSE_EQ",
             security_category=cls.SecurityCategory.OPERATING_EQUITY,
             provider_security_type__in=("", "NORMAL"),
-        ).exclude(upstox_instrument_key="")
+        )

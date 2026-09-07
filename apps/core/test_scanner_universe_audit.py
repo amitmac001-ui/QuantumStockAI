@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import patch
 
 from django.db import connection
 from django.test import TestCase
@@ -131,3 +132,23 @@ class ScannerUniverseAuditTests(TestCase):
         self.assertFalse(
             ScannerUniverseAuditService._is_checksum_valid_isin("INE002A01019")
         )
+
+    def test_legacy_schema_audit_uses_narrow_eq_fallback_without_new_columns(self):
+        legacy_columns = frozenset({
+            "id", "symbol", "exchange", "isin", "upstox_instrument_key",
+            "name", "series", "is_active", "instrument_status",
+        })
+        with patch.object(
+            Company, "persisted_database_columns", return_value=legacy_columns
+        ), CaptureQueriesContext(connection) as queries:
+            audit = ScannerUniverseAuditService.collect()
+
+        self.assertEqual(
+            audit["current_eligibility"]["company_rows_matching_rule"], 2
+        )
+        evidence = audit["classification_evidence"]
+        self.assertFalse(evidence["schema_can_prove_company_equity_universe"])
+        self.assertIsNone(evidence["provider_security_type_counts"])
+        sql = " ".join(query["sql"] for query in queries.captured_queries)
+        self.assertNotIn("provider_security_type", sql)
+        self.assertNotIn("security_category", sql)
