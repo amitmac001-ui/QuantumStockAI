@@ -271,29 +271,28 @@ class CloudEODIngestionService:
         self, latest_session: date, *, limit: int = 0,
         include_insufficient: bool = False,
     ) -> dict[str, int]:
-        companies = list(Company.scanner_eligible().only(
+        companies = list(Company.scanner_eligible().annotate(
+            cloud_history_sessions=Count("cloud_daily_candles", distinct=True),
+            cloud_latest_session=Max("cloud_daily_candles__session_date"),
+        ).only(
             "id", "symbol", "exchange", "upstox_instrument_key",
             "history_sync_last_attempt_at", "history_sync_last_success_session",
             "three_year_high", "three_year_high_session",
             "three_year_window_start", "three_year_observations",
         ))
         history_state = {
-            company_id: (latest, sessions)
-            for company_id, latest, sessions in CloudDailyCandle.objects.values(
-                "company_id"
-            ).annotate(latest=Max("session_date"), sessions=Count("session_date")).values_list(
-                "company_id", "latest", "sessions"
-            )
+            company.id: (company.cloud_latest_session, company.cloud_history_sessions)
+            for company in companies
         }
         latest_map = {company_id: state[0] for company_id, state in history_state.items()}
         pending = [
             company for company in companies
-            if latest_map.get(company.id) is None
-            or latest_map[company.id] < latest_session
-            or (
-                include_insufficient
-                and history_state.get(company.id, (None, 0))[1]
-                < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            if (
+                history_state[company.id][1] < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+                if include_insufficient else (
+                    latest_map.get(company.id) is None
+                    or latest_map[company.id] < latest_session
+                )
             )
         ]
         pending.sort(key=lambda company: (
