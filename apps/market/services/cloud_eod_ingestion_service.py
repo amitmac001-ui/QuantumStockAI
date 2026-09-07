@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 from django.db import connection, transaction
-from django.db.models import Max
+from django.db.models import Count, Max
 from django.utils import timezone
 
 from apps.companies.models import Company
@@ -73,6 +73,7 @@ class CloudEODIngestionService:
     WRITE_BATCH_SIZE = 5_000
     REQUEST_INTERVAL_SECONDS = 0.25
     MINIMUM_INSTRUMENT_MASTER_ROWS = 1_000
+    MINIMUM_SCANNER_HISTORY_SESSIONS = 252
 
     def __init__(self, *, historical=None, quotes=None, http=None, now=None, sleep=None):
         self.historical = historical
@@ -266,22 +267,41 @@ class CloudEODIngestionService:
         created = len(keys.difference(existing))
         return created, len(keys) - created
 
-    def sync_stock_history(self, latest_session: date, *, limit: int = 0) -> dict[str, int]:
+    def sync_stock_history(
+        self, latest_session: date, *, limit: int = 0,
+        include_insufficient: bool = False,
+    ) -> dict[str, int]:
         companies = list(Company.scanner_eligible().only(
             "id", "symbol", "exchange", "upstox_instrument_key",
             "history_sync_last_attempt_at", "history_sync_last_success_session",
             "three_year_high", "three_year_high_session",
             "three_year_window_start", "three_year_observations",
         ))
-        latest_map = dict(CloudDailyCandle.objects.values_list("company_id").annotate(
-            latest=Max("session_date")
-        ).values_list("company_id", "latest"))
+        history_state = {
+            company_id: (latest, sessions)
+            for company_id, latest, sessions in CloudDailyCandle.objects.values(
+                "company_id"
+            ).annotate(latest=Max("session_date"), sessions=Count("session_date")).values_list(
+                "company_id", "latest", "sessions"
+            )
+        }
+        latest_map = {company_id: state[0] for company_id, state in history_state.items()}
         pending = [
             company for company in companies
             if latest_map.get(company.id) is None
             or latest_map[company.id] < latest_session
+            or (
+                include_insufficient
+                and history_state.get(company.id, (None, 0))[1]
+                < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            )
         ]
         pending.sort(key=lambda company: (
+            (
+                history_state.get(company.id, (None, 0))[1]
+                >= self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            ) if include_insufficient else False,
+            history_state.get(company.id, (None, 0))[1] if include_insufficient else 0,
             latest_map.get(company.id) or date.min,
             company.history_sync_last_attempt_at is not None,
             company.history_sync_last_attempt_at or datetime.min.replace(
@@ -299,10 +319,14 @@ class CloudEODIngestionService:
             counters["attempted"] += 1
             company.history_sync_last_attempt_at = timezone.now()
             attempted_companies.append(company)
+            insufficient = include_insufficient and (
+                history_state.get(company.id, (None, 0))[1]
+                < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            )
             start = (
-                latest_map[company.id] + timedelta(days=1)
-                if latest_map.get(company.id)
-                else latest_session - timedelta(days=self.INITIAL_CALENDAR_DAYS)
+                latest_session - timedelta(days=self.INITIAL_CALENDAR_DAYS)
+                if insufficient or latest_map.get(company.id) is None
+                else latest_map[company.id] + timedelta(days=1)
             )
             try:
                 response = self.history._request(company.upstox_instrument_key, start, latest_session)
