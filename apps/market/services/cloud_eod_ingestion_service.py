@@ -288,7 +288,12 @@ class CloudEODIngestionService:
         pending = [
             company for company in companies
             if (
-                history_state[company.id][1] < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+                (
+                    history_state[company.id][1]
+                    < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+                    or latest_map.get(company.id) is None
+                    or latest_map[company.id] < latest_session
+                )
                 if include_insufficient else (
                     latest_map.get(company.id) is None
                     or latest_map[company.id] < latest_session
@@ -296,6 +301,7 @@ class CloudEODIngestionService:
             )
         ]
         pending.sort(key=lambda company: (
+            history_state[company.id][1] != 0 if include_insufficient else False,
             (
                 history_state.get(company.id, (None, 0))[1]
                 >= self.MINIMUM_SCANNER_HISTORY_SESSIONS
