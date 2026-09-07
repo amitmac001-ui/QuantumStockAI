@@ -49,6 +49,10 @@ from apps.scanner.engine.volume_features import volume_feature_extractor
 from apps.scanner.engine.weekly_features import weekly_feature_extractor
 from apps.scanner.engine.vcp_features import vcp_feature_extractor
 from apps.scanner.repositories.scanner_repository import ScannerRepository
+from apps.scanner.services.scan_report_cache_service import (
+    InvalidScanCache,
+    ScanReportCacheService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +114,7 @@ class ScannerService:
             columns = set()
         if summary_fields <= columns:
             only_fields.extend(sorted(summary_fields))
-        queryset = Company.objects.filter(
-            is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
-            series="EQ",
-        ).only(*only_fields)
+        queryset = Company.scanner_eligible().only(*only_fields)
 
         for company in queryset.iterator(chunk_size=2_000):
             key = cls._key(company.symbol, company.exchange)
@@ -562,27 +562,78 @@ class ScannerService:
         return ", ".join(matched) if matched else ""
 
     @classmethod
-    def analyze(cls, snapshot: Mapping[str, Any]) -> dict[str, Any]:
-        report = scanner_engine.scan(snapshot)
+    def report_payload(cls, report: ScanReport) -> dict[str, Any]:
         strategies = sorted(
             report.strategies,
             key=lambda strategy: (strategy.score, strategy.weight, strategy.strategy_name),
             reverse=True,
         )
-
         return {
             "symbol": report.snapshot.symbol,
+            "company_name": report.snapshot.company_name,
+            "exchange": report.snapshot.exchange,
+            "sector": report.snapshot.sector,
+            "industry": report.snapshot.industry,
+            "price": report.snapshot.last_price,
             "summary": {
                 "total_score": report.overall_score,
                 "confidence": report.confidence_score,
                 "verdict": report.status,
             },
-            "strategies": strategies,
-            "report": report,
+            "setup": {
+                "pre_breakout": report.is_pre_breakout,
+                "breakout": report.is_breakout,
+                "classification": report.prebreakout_classification,
+                "prebreakout_score": report.prebreakout_score,
+                "breakout_probability": report.breakout_probability,
+                "resistance": report.resistance,
+                "support": report.support,
+                "distance_from_breakout": report.distance_from_breakout,
+                "risk_flags": report.prebreakout_risk_flags,
+                "data_quality": report.prebreakout_data_quality,
+            },
+            "strategies": [
+                {
+                    "name": strategy.strategy_name,
+                    "passed": strategy.passed,
+                    "score": strategy.score,
+                    "weight": strategy.weight,
+                    "confidence": strategy.confidence,
+                    "reasons": strategy.reasons,
+                }
+                for strategy in strategies
+            ],
+            "session": (
+                report.snapshot.latest_daily_session.isoformat()
+                if hasattr(report.snapshot.latest_daily_session, "isoformat")
+                else report.snapshot.latest_daily_session
+            ),
         }
 
     @classmethod
-    def scan(cls, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    def analyze(cls, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        report = scanner_engine.scan(snapshot)
+        payload = cls.report_payload(report)
+        payload["report"] = report
+        return payload
+
+    @classmethod
+    def scan(cls, snapshot: Mapping[str, Any] | str) -> dict[str, Any] | None:
+        if isinstance(snapshot, str):
+            symbol = snapshot.strip().upper()
+            try:
+                reports, _context = ScanReportCacheService().load_valid()
+            except InvalidScanCache:
+                return None
+            report = next(
+                (
+                    item
+                    for item in reports
+                    if item.snapshot.symbol.strip().upper() == symbol
+                ),
+                None,
+            )
+            return cls.report_payload(report) if report else None
         return cls.analyze(snapshot)
 
     @classmethod

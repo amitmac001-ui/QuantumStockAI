@@ -1,44 +1,24 @@
-<header
-class="sticky top-0 z-50 border-b border-slate-800 bg-[#0B1220]/95 backdrop-blur">
-
-<div class="mx-auto flex max-w-md items-center gap-3 p-4">
-
-<button
-class="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700">
-
-☰
-
-</button>
-
-<a
-href="/"
-class="flex-1 text-[22px] font-bold tracking-tight">
-
-Quantum<span class="text-blue-500">Stock</span>
-<span class="text-violet-400">AI</span>
-
-</a>
-
-<button
-class="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700">
-
-🔔
-
-</button>
-
-</div>
-
-<div class="mx-auto max-w-md px-4 pb-4">
-
-<form>
-
-<input
-type="search"
-placeholder="Search NSE Stock..."
-class="h-12 w-full rounded-2xl border border-slate-700 bg-[#141C2F] px-5 text-sm outline-none focus:border-blue-500">
-
-</form>
-
-</div>
-
+<header class="topbar">
+    <div class="topbar__inner">
+        <button class="icon-button" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span aria-hidden="true">☰</span>
+        </button>
+        <a href="{% url 'dashboard:home' %}" class="brand" aria-label="QuantumStock AI dashboard">
+            <span class="brand__mark">Q</span>
+            <span>QuantumStock <strong>AI</strong></span>
+        </a>
+        <div class="topbar-search">
+            <label class="sr-only" for="dashboard-search">Search stocks, sectors or indices</label>
+            <input id="dashboard-search" type="search" autocomplete="off" placeholder="Search stocks, sectors or indices…" aria-controls="search-results" aria-expanded="false">
+            <div class="search-results" id="search-results" hidden></div>
+            <span class="topbar-search__selection" id="search-selection" aria-live="polite"></span>
+        </div>
+        <div class="topbar__account">
+            <span class="topbar__email">{{ request.user.email }}</span>
+            <form method="post" action="{% url 'website-logout' %}">
+                {% csrf_token %}
+                <button class="button button--quiet" type="submit">Log out</button>
+            </form>
+        </div>
+    </div>
 </header>

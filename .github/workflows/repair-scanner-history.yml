@@ -1,0 +1,49 @@
+name: Repair scanner history readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Maximum insufficient-history instruments to process (1-500)
+        required: false
+        default: "500"
+
+concurrency:
+  group: repair-scanner-history-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  repair-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}
+      DJANGO_SECRET_KEY: ${{ github.token }}
+      DJANGO_DEBUG: "False"
+      CHANNEL_BACKEND: memory
+      CLOUD_COMPACT_MARKET_DATA: "1"
+      GOOGLE_SHEETS_ENABLED: "False"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Require database and analytics credentials
+        shell: bash
+        run: |
+          missing=()
+          [[ -z "$DATABASE_URL" ]] && missing+=(DATABASE_URL)
+          [[ -z "$UPSTOX_ANALYTICS_TOKEN" ]] && missing+=(UPSTOX_ANALYTICS_TOKEN)
+          if (( ${#missing[@]} )); then
+            printf 'Missing required secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Backfill insufficient scanner history only
+        run: python manage.py repair_scanner_history --limit "${{ inputs.limit }}"

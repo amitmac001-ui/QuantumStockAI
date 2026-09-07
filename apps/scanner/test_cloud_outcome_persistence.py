@@ -49,6 +49,9 @@ class CloudOutcomePersistenceTests(TestCase):
         Company.objects.create(
             symbol="TEST", exchange="NSE", name="Test Ltd",
             upstox_instrument_key="NSE_EQ|TEST", is_active=True,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
         )
         self.outcome = PreBreakoutSetupOutcome.objects.create(
             symbol="TEST", exchange="NSE", evaluation_session=self.signal_session,

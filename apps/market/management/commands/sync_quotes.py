@@ -2,7 +2,6 @@ import time
 
 from django.core.management.base import BaseCommand
 
-from apps.companies.models import Company
 from apps.market.services.quote_sync import QuoteSyncService
 
 
@@ -16,6 +15,11 @@ class Command(BaseCommand):
             type=int,
             default=5,
         )
+        parser.add_argument(
+            "--once",
+            action="store_true",
+            help="Run one bounded provider sync and exit.",
+        )
 
     def handle(self, *args, **options):
 
@@ -24,19 +28,7 @@ class Command(BaseCommand):
             1,
         )
 
-        instruments = list(
-            Company.objects.filter(
-                is_active=True,
-                exchange="NSE",
-            )
-            .exclude(
-                upstox_instrument_key="",
-            )
-            .values_list(
-                "upstox_instrument_key",
-                flat=True,
-            )
-        )
+        instruments = QuoteSyncService.default_instruments()
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -66,15 +58,25 @@ class Command(BaseCommand):
 
             try:
 
-                total = service.sync(
+                result = service.sync(
                     instruments
                 )
 
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f"{total} Quotes Updated"
+                        "QUOTE_SYNC_RESULT "
+                        f"requested={result.requested} "
+                        f"updated={result.quotes_updated} "
+                        f"coverage_pct={result.coverage * 100:.2f} "
+                        f"batches={result.batches} "
+                        f"batches_failed={result.batches_failed} "
+                        f"skipped={result.skipped} "
+                        f"failed_instruments={result.failed_instruments}"
                     )
                 )
+
+                if options["once"]:
+                    break
 
             except KeyboardInterrupt:
 

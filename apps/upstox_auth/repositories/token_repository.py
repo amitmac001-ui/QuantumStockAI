@@ -14,7 +14,7 @@ class TokenRepository:
     @transaction.atomic
     def get(self) -> UpstoxToken:
         token = (
-            UpstoxToken.objects
+            UpstoxToken.objects.filter(is_active=True)
             .order_by("-updated_at", "-id")
             .first()
         )
@@ -33,7 +33,7 @@ class TokenRepository:
         expires_at,
     ) -> UpstoxToken:
         token = (
-            UpstoxToken.objects
+            UpstoxToken.objects.filter(is_active=True)
             .order_by("-updated_at", "-id")
             .first()
         )
@@ -44,6 +44,7 @@ class TokenRepository:
         token.access_token = access_token
         token.refresh_token = refresh_token
         token.expires_at = expires_at
+        token.is_active = True
         token.save()
 
         return token

@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import models
+from django.db import connection, models
 
 
 class Company(models.Model):
@@ -9,6 +9,13 @@ class Company(models.Model):
         SUSPENDED = "suspended", "Suspended"
         INACTIVE = "inactive", "Inactive"
         INVALID = "invalid", "Invalid instrument"
+
+    class SecurityCategory(models.TextChoices):
+        OPERATING_EQUITY = "operating_equity", "Operating-company equity"
+        ETF = "etf", "Exchange-traded fund"
+        DEBT = "debt", "Debt or government security"
+        OTHER = "other", "Other security"
+        UNKNOWN = "unknown", "Unclassified"
 
     id = models.UUIDField(
         primary_key=True,
@@ -53,6 +60,27 @@ class Company(models.Model):
         max_length=20,
         blank=True,
     )
+
+    provider_segment = models.CharField(max_length=30, blank=True, db_index=True)
+
+    provider_instrument_type = models.CharField(
+        max_length=30, blank=True, db_index=True
+    )
+
+    provider_security_type = models.CharField(
+        max_length=30, blank=True, db_index=True
+    )
+
+    security_category = models.CharField(
+        max_length=30,
+        choices=SecurityCategory.choices,
+        default=SecurityCategory.UNKNOWN,
+        db_index=True,
+    )
+
+    history_sync_last_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    history_sync_last_success_session = models.DateField(null=True, blank=True, db_index=True)
 
     sector = models.CharField(
         max_length=100,
@@ -143,4 +171,42 @@ class Company(models.Model):
             self.is_active
             and self.instrument_status == self.InstrumentStatus.ACTIVE
             and str(self.upstox_instrument_key or "").strip()
+            and self.provider_segment == "NSE_EQ"
+            and self.security_category == self.SecurityCategory.OPERATING_EQUITY
+            and self.provider_security_type in {"", "NORMAL"}
+        )
+
+    @classmethod
+    def persisted_database_columns(cls) -> frozenset[str]:
+        """Return the columns currently available without assuming migrations ran."""
+        try:
+            with connection.cursor() as cursor:
+                description = connection.introspection.get_table_description(
+                    cursor, cls._meta.db_table
+                )
+        except Exception:
+            return frozenset()
+        return frozenset(column.name for column in description)
+
+    @classmethod
+    def scanner_eligible(cls):
+        base = cls.objects.filter(
+            exchange="NSE",
+            is_active=True,
+            instrument_status=cls.InstrumentStatus.ACTIVE,
+        ).exclude(upstox_instrument_key="")
+        classification_columns = {
+            "provider_segment",
+            "provider_security_type",
+            "security_category",
+        }
+        if not classification_columns.issubset(cls.persisted_database_columns()):
+            # Pull-request diagnostics deliberately use the shared database in a
+            # read-only mode. Until its migration is applied, retain the prior,
+            # narrow NSE EQ rule instead of querying columns that do not exist.
+            return base.filter(series="EQ")
+        return base.filter(
+            provider_segment="NSE_EQ",
+            security_category=cls.SecurityCategory.OPERATING_EQUITY,
+            provider_security_type__in=("", "NORMAL"),
         )

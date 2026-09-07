@@ -1,0 +1,75 @@
+<article class="stock-card" data-market-symbol="{{ card.symbol }}" data-stock-url="{% url 'dashboard:stock-detail' symbol=card.symbol %}" tabindex="0" role="link"{% if card.sector %} data-sector="{{ card.sector }}"{% endif %}{% if card.instrument_key %} data-instrument-key="{{ card.instrument_key }}"{% endif %}>
+    <header class="stock-card__header">
+        <div>
+            <p class="stock-card__company">{{ card.company }}</p>
+            <p class="stock-card__identity">
+                <strong>{{ card.symbol }}</strong>
+                {% if card.sector %}<span>{{ card.sector }}</span>{% endif %}
+                {% if card.industry %}<span>{{ card.industry }}</span>{% endif %}
+            </p>
+        </div>
+        <div class="stock-card__quote">
+            <p class="stock-card__price">₹<span data-field="price">{{ card.price|floatformat:2 }}</span></p>
+            {% if card.change_percent is not None %}
+                <p class="market-change {% if card.change_percent >= 0 %}positive{% else %}negative{% endif %}">
+                    <span data-field="change-percent">{{ card.change_percent|floatformat:2 }}</span>%
+                </p>
+            {% endif %}
+        </div>
+    </header>
+
+    <div class="stock-card__stage-row">
+        <span class="setup-state">{{ card.state }}</span>
+        {% if card.engine_classification %}<span class="engine-classification">{{ card.engine_classification }}</span>{% endif %}
+    </div>
+
+    <div class="ohlc-row">
+        <span>{{ card.session|date:"d M Y"|default:"Session unavailable" }}</span>
+        {% if card.open is not None %}<span>O {{ card.open|floatformat:2 }}</span>{% endif %}
+        {% if card.high is not None %}<span>H {{ card.high|floatformat:2 }}</span>{% endif %}
+        {% if card.low is not None %}<span>L {{ card.low|floatformat:2 }}</span>{% endif %}
+        {% if card.close is not None %}<span>C {{ card.close|floatformat:2 }}</span>{% endif %}
+        {% if card.volume is not None %}<span>Vol {{ card.volume }}</span>{% endif %}
+    </div>
+
+    <div class="mini-chart">
+        {% if card.chart|length >= 2 %}
+            <canvas aria-label="Stored daily OHLC chart for {{ card.symbol }}" data-pivot="{{ card.pivot|default:'' }}"></canvas>
+            {{ card.chart|json_script }}
+        {% else %}
+            <p class="empty-inline">Chart unavailable</p>
+        {% endif %}
+    </div>
+
+    <dl class="metric-grid">
+        {% if card.rs_rating is not None %}<div><dt>RS Rating</dt><dd>{{ card.rs_rating }}</dd></div>{% endif %}
+        {% if card.distance_from_pivot_percent is not None %}<div><dt>From pivot</dt><dd>{{ card.distance_from_pivot_percent|floatformat:2 }}%</dd></div>{% endif %}
+        {% if card.atr_tightening is not None %}<div><dt>ATR tightening</dt><dd>{{ card.atr_tightening|yesno:"Yes,No" }}</dd></div>{% endif %}
+        {% if card.volume_dry_up is not None %}<div><dt>Volume dry-up</dt><dd>{{ card.volume_dry_up|yesno:"Yes,No" }}</dd></div>{% endif %}
+        {% if card.up_down_volume_ratio is not None %}<div><dt>Up/down volume</dt><dd>{{ card.up_down_volume_ratio|floatformat:2 }}</dd></div>{% endif %}
+        {% if card.accumulation_distribution_balance is not None %}<div><dt>Accumulation</dt><dd>{{ card.accumulation_distribution_balance|floatformat:2 }}</dd></div>{% endif %}
+        {% if card.distance_from_52w_high_percent is not None %}<div><dt>Below 52W high</dt><dd>{{ card.distance_from_52w_high_percent|floatformat:2 }}%</dd></div>{% endif %}
+        <div><dt>Pre-breakout</dt><dd>{{ card.prebreakout_score }}</dd></div>
+        <div><dt>QuantumScore</dt><dd>{{ card.overall_score }}</dd></div>
+        {% if card.breakout_probability is not None %}<div><dt>Breakout probability</dt><dd>{{ card.breakout_probability|floatformat:1 }}%</dd></div>{% endif %}
+    </dl>
+
+    {% if card.pivot %}<p class="pivot-note">Pivot / resistance ₹{{ card.pivot|floatformat:2 }}</p>{% endif %}
+    {% if card.positive_evidence %}
+        <div class="flag-list flag-list--positive" aria-label="Positive setup evidence">
+            {% for flag in card.positive_evidence %}<span>{{ flag }}</span>{% endfor %}
+        </div>
+    {% endif %}
+    {% if card.risk_flags %}
+        <div class="flag-list flag-list--risk" aria-label="Risk flags">
+            {% for flag in card.risk_flags %}<span>{{ flag }}</span>{% endfor %}
+        </div>
+    {% endif %}
+    {% if card.quality_flags %}
+        <details class="quality-details">
+            <summary>Data quality</summary>
+            <div class="flag-list">{% for flag in card.quality_flags %}<span>{{ flag }}</span>{% endfor %}</div>
+        </details>
+    {% endif %}
+    <a class="stock-card__xray-link" href="{% url 'dashboard:stock-detail' symbol=card.symbol %}">Open full X-ray →</a>
+</article>

@@ -92,6 +92,14 @@ class ScannerUniverseAuditService:
     @classmethod
     def collect(cls) -> dict[str, Any]:
         companies = Company.objects.all()
+        database_columns = Company.persisted_database_columns()
+        classification_fields = {
+            "provider_segment",
+            "provider_instrument_type",
+            "provider_security_type",
+            "security_category",
+        }
+        classification_available = classification_fields.issubset(database_columns)
         eligible = ScannerDataReadinessService.eligible_companies()
         eligible_count = eligible.values("id").distinct().count()
 
@@ -166,7 +174,12 @@ class ScannerUniverseAuditService:
             "current_eligibility": {
                 "rule": (
                     "exchange=NSE,is_active=true,instrument_status=active,"
-                    "instrument_key_not_empty"
+                    + (
+                        "provider_segment=NSE_EQ,security_category=operating_equity,"
+                        "provider_security_type in [blank,NORMAL],"
+                        if classification_available else "series=EQ,"
+                    )
+                    + "instrument_key_not_empty"
                 ),
                 "company_rows_matching_rule": eligible_count,
                 "distinct_symbols_matching_rule": (
@@ -210,17 +223,28 @@ class ScannerUniverseAuditService:
                 ),
             },
             "classification_evidence": {
-                "persisted_exchange": True,
-                "persisted_series": True,
-                "persisted_source_segment": False,
-                "persisted_dedicated_instrument_type": False,
-                "persisted_security_category": False,
-                "schema_can_prove_company_equity_universe": False,
-                "blocker": (
-                    "Company.series is populated from NSE CSV SERIES or Upstox "
-                    "instrument_type; source segment and a dedicated security "
-                    "category are not persisted. Exact company-equity classification "
-                    "cannot be reconstructed safely from stored fields alone."
+                "persisted_exchange": "exchange" in database_columns,
+                "persisted_series": "series" in database_columns,
+                "persisted_source_segment": "provider_segment" in database_columns,
+                "persisted_dedicated_instrument_type": (
+                    "provider_instrument_type" in database_columns
+                ),
+                "persisted_provider_security_type": (
+                    "provider_security_type" in database_columns
+                ),
+                "persisted_security_category": "security_category" in database_columns,
+                "schema_can_prove_company_equity_universe": classification_available,
+                "security_category_counts": (
+                    cls._group_counts(companies, "security_category")
+                    if "security_category" in database_columns else None
+                ),
+                "provider_segment_counts": (
+                    cls._group_counts(companies, "provider_segment")
+                    if "provider_segment" in database_columns else None
+                ),
+                "provider_security_type_counts": (
+                    cls._group_counts(companies, "provider_security_type")
+                    if "provider_security_type" in database_columns else None
                 ),
             },
         }

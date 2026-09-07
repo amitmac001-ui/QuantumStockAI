@@ -10,11 +10,13 @@ from typing import Any
 
 import requests
 from django.db import connection, transaction
-from django.db.models import Max
+from django.db.models import Count, Max
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 
 from apps.companies.models import Company
+from apps.companies.services.instrument_classification import (
+    InstrumentClassificationService,
+)
 from apps.market.models import (
     CloudBenchmarkCandle,
     CloudDailyCandle,
@@ -23,6 +25,9 @@ from apps.market.models import (
 from apps.market.providers.historical_client import HistoricalClient
 from apps.market.providers.upstox_client import UpstoxClient
 from apps.market.services.daily_history_sync_service import DailyHistorySyncService
+from apps.market.services.market_service import MarketService
+from apps.market.services.quote_normalizer import QuoteNormalizer
+from apps.market.services.quote_sync import QuoteSyncService
 
 
 @dataclass(slots=True)
@@ -39,6 +44,9 @@ class CloudEODIngestionResult:
     provider_failed: int = 0
     benchmark_rows: int = 0
     quotes_updated: int = 0
+    quotes_requested: int = 0
+    quotes_skipped: int = 0
+    quote_batches_failed: int = 0
     candles_pruned: int = 0
     benchmark_pruned: int = 0
     failures: list[str] = field(default_factory=list)
@@ -64,16 +72,33 @@ class CloudEODIngestionService:
     QUOTE_BATCH_SIZE = 200
     WRITE_BATCH_SIZE = 5_000
     REQUEST_INTERVAL_SECONDS = 0.25
+    MINIMUM_INSTRUMENT_MASTER_ROWS = 1_000
+    MINIMUM_SCANNER_HISTORY_SESSIONS = 252
 
     def __init__(self, *, historical=None, quotes=None, http=None, now=None, sleep=None):
-        self.historical = historical or HistoricalClient()
-        self.quotes = quotes or UpstoxClient()
+        self.historical = historical
+        self.quotes = quotes
         self.http = http or requests.Session()
         self.sleep = sleep or time.sleep
-        self.history = DailyHistorySyncService(
-            self.historical, now=now, sleep=self.sleep,
-            request_interval_seconds=self.REQUEST_INTERVAL_SECONDS,
+        self.now = now
+        self.history = (
+            DailyHistorySyncService(
+                self.historical, now=now, sleep=self.sleep,
+                request_interval_seconds=self.REQUEST_INTERVAL_SECONDS,
+            )
+            if self.historical is not None else None
         )
+
+    def _ensure_provider_clients(self):
+        if self.historical is None:
+            self.historical = HistoricalClient()
+        if self.quotes is None:
+            self.quotes = UpstoxClient()
+        if self.history is None:
+            self.history = DailyHistorySyncService(
+                self.historical, now=self.now, sleep=self.sleep,
+                request_interval_seconds=self.REQUEST_INTERVAL_SECONDS,
+            )
 
     def _download_json_gzip(self, url: str) -> list[dict[str, Any]]:
         response = self.http.get(url, timeout=60)
@@ -97,7 +122,7 @@ class CloudEODIngestionService:
                 continue
             selected[symbol] = row
 
-        if len(selected) < 1_000:
+        if len(selected) < self.MINIMUM_INSTRUMENT_MASTER_ROWS:
             raise RuntimeError("Upstox NSE instrument master is unexpectedly incomplete.")
 
         existing = {
@@ -107,15 +132,30 @@ class CloudEODIngestionService:
         creates, updates = [], []
         update_fields = [
             "exchange", "isin", "upstox_instrument_key", "name", "series",
+            "provider_segment", "provider_instrument_type",
+            "provider_security_type", "security_category",
             "is_active", "instrument_status", "instrument_status_reason",
         ]
         for symbol, row in selected.items():
+            segment = str(row.get("segment") or "").strip().upper()
+            instrument_type = str(row.get("instrument_type") or "").strip().upper()
+            security_type = str(row.get("security_type") or "").strip().upper()
+            isin = str(row.get("isin") or "").strip().upper()
             values = {
                 "exchange": "NSE",
-                "isin": str(row.get("isin") or "").strip().upper(),
+                "isin": isin,
                 "upstox_instrument_key": str(row.get("instrument_key") or "").strip(),
                 "name": str(row.get("name") or row.get("short_name") or symbol).strip(),
-                "series": str(row.get("instrument_type") or "").strip().upper(),
+                "series": instrument_type,
+                "provider_segment": segment,
+                "provider_instrument_type": instrument_type,
+                "provider_security_type": security_type,
+                "security_category": InstrumentClassificationService.classify(
+                    segment=segment,
+                    instrument_type=instrument_type,
+                    security_type=security_type,
+                    isin=isin,
+                ),
                 "is_active": True,
                 "instrument_status": Company.InstrumentStatus.ACTIVE,
                 "instrument_status_reason": "",
@@ -151,15 +191,16 @@ class CloudEODIngestionService:
         if suspended_keys:
             suspended = Company.objects.filter(
                 upstox_instrument_key__in=suspended_keys
+            ).exclude(
+                upstox_instrument_key__in=selected_keys
             ).update(
                 is_active=False,
                 instrument_status=Company.InstrumentStatus.SUSPENDED,
-                instrument_status_reason="Upstox suspended instrument master",
+                instrument_status_reason=(
+                    "Absent from active master and present in Upstox suspended archive"
+                ),
             )
-        active_count = Company.objects.filter(
-            exchange="NSE", is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
-        ).exclude(upstox_instrument_key="").count()
+        active_count = Company.scanner_eligible().count()
         return active_count, suspended
 
     def resolve_latest_session(self) -> date:
@@ -195,9 +236,20 @@ class CloudEODIngestionService:
         ]
 
     @staticmethod
+    def _deduplicate_rows(rows, key):
+        """Keep the last provider row for each conflict key, preserving key order."""
+        deduplicated = {}
+        for row in rows:
+            deduplicated[key(row)] = row
+        return list(deduplicated.values())
+
+    @staticmethod
     def _flush_stock_rows(rows: list[CloudDailyCandle]) -> tuple[int, int]:
         if not rows:
             return 0, 0
+        rows = CloudEODIngestionService._deduplicate_rows(
+            rows, lambda row: (row.company_id, row.session_date)
+        )
         keys = {(row.company_id, row.session_date) for row in rows}
         company_ids = {key[0] for key in keys}
         dates = {key[1] for key in keys}
@@ -215,28 +267,46 @@ class CloudEODIngestionService:
         created = len(keys.difference(existing))
         return created, len(keys) - created
 
-    def sync_stock_history(self, latest_session: date, *, limit: int = 0) -> dict[str, int]:
-        companies = list(Company.objects.filter(
-            exchange="NSE", is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
-            series="EQ",
-        ).exclude(upstox_instrument_key="").only(
+    def sync_stock_history(
+        self, latest_session: date, *, limit: int = 0,
+        include_insufficient: bool = False,
+    ) -> dict[str, int]:
+        companies = list(Company.scanner_eligible().only(
             "id", "symbol", "exchange", "upstox_instrument_key",
+            "history_sync_last_attempt_at", "history_sync_last_success_session",
             "three_year_high", "three_year_high_session",
             "three_year_window_start", "three_year_observations",
-        ).order_by("symbol"))
-        latest_map = dict(CloudDailyCandle.objects.values_list("company_id").annotate(
-            latest=Max("session_date")
-        ).values_list("company_id", "latest"))
+        ))
+        history_state = {
+            company_id: (latest, sessions)
+            for company_id, latest, sessions in CloudDailyCandle.objects.values(
+                "company_id"
+            ).annotate(latest=Max("session_date"), sessions=Count("session_date")).values_list(
+                "company_id", "latest", "sessions"
+            )
+        }
+        latest_map = {company_id: state[0] for company_id, state in history_state.items()}
         pending = [
             company for company in companies
-            if latest_map.get(company.id) != latest_session
+            if latest_map.get(company.id) is None
+            or latest_map[company.id] < latest_session
+            or (
+                include_insufficient
+                and history_state.get(company.id, (None, 0))[1]
+                < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            )
         ]
-        # Always advance the stalest/missing instruments first. Symbol ordering
-        # alone repeatedly refreshed the same first 500 names whenever a new
-        # session opened, so full-universe coverage could never catch up.
         pending.sort(key=lambda company: (
+            (
+                history_state.get(company.id, (None, 0))[1]
+                >= self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            ) if include_insufficient else False,
+            history_state.get(company.id, (None, 0))[1] if include_insufficient else 0,
             latest_map.get(company.id) or date.min,
+            company.history_sync_last_attempt_at is not None,
+            company.history_sync_last_attempt_at or datetime.min.replace(
+                tzinfo=datetime_timezone.utc
+            ),
             company.symbol,
         ))
         processable = pending[: (limit or self.HISTORY_BATCH_LIMIT)]
@@ -244,12 +314,19 @@ class CloudEODIngestionService:
                     "created": 0, "rows_updated": 0, "empty": 0, "failed": 0}
         buffer: list[CloudDailyCandle] = []
         high_summaries: list[Company] = []
+        attempted_companies = []
         for company in processable:
             counters["attempted"] += 1
+            company.history_sync_last_attempt_at = timezone.now()
+            attempted_companies.append(company)
+            insufficient = include_insufficient and (
+                history_state.get(company.id, (None, 0))[1]
+                < self.MINIMUM_SCANNER_HISTORY_SESSIONS
+            )
             start = (
-                latest_map[company.id] + timedelta(days=1)
-                if latest_map.get(company.id)
-                else latest_session - timedelta(days=self.INITIAL_CALENDAR_DAYS)
+                latest_session - timedelta(days=self.INITIAL_CALENDAR_DAYS)
+                if insufficient or latest_map.get(company.id) is None
+                else latest_map[company.id] + timedelta(days=1)
             )
             try:
                 response = self.history._request(company.upstox_instrument_key, start, latest_session)
@@ -274,6 +351,7 @@ class CloudEODIngestionService:
                     company.three_year_observations = len(clean)
                 high_summaries.append(company)
                 counters["updated"] += 1
+                company.history_sync_last_success_session = max(clean["session_date"])
                 if len(buffer) >= self.WRITE_BATCH_SIZE:
                     created, updated = self._flush_stock_rows(buffer)
                     counters["created"] += created
@@ -281,6 +359,12 @@ class CloudEODIngestionService:
                     buffer.clear()
             except Exception:
                 counters["failed"] += 1
+        if attempted_companies:
+            Company.objects.bulk_update(
+                attempted_companies,
+                ["history_sync_last_attempt_at", "history_sync_last_success_session"],
+                batch_size=1_000,
+            )
         created, updated = self._flush_stock_rows(buffer)
         counters["created"] += created
         counters["rows_updated"] += updated
@@ -312,6 +396,7 @@ class CloudEODIngestionService:
             volume=int(row.volume), provider_timestamp=row.provider_timestamp,
             data_quality_flags=row.data_quality_flags or [],
         ) for row in clean.itertuples(index=False)]
+        rows = self._deduplicate_rows(rows, lambda row: row.session_date)
         CloudBenchmarkCandle.objects.bulk_create(
             rows, batch_size=500, update_conflicts=True,
             unique_fields=["session_date"],
@@ -327,95 +412,91 @@ class CloudEODIngestionService:
         for index in range(0, len(items), size):
             yield items[index:index + size]
 
-    @staticmethod
-    def _parse_quote_timestamp(value):
-        if value in (None, ""):
-            return None
-        parsed = parse_datetime(str(value))
-        if parsed is None:
-            return None
-        return timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed
+    def _request_quote_batch(self, instrument_keys):
+        for attempt in range(1, DailyHistorySyncService.MAX_RETRIES + 1):
+            try:
+                return self.quotes.quote(",".join(instrument_keys))
+            except Exception as exc:
+                if (
+                    attempt >= DailyHistorySyncService.MAX_RETRIES
+                    or not DailyHistorySyncService._retryable(exc)
+                ):
+                    raise
+                self.sleep(min(2 ** (attempt - 1), 8))
 
-    @classmethod
-    def _parse_last_trade_time(cls, value):
-        if value in (None, ""):
-            return None
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            return cls._parse_quote_timestamp(value)
-        if numeric > 10_000_000_000:
-            numeric /= 1000.0
-        return datetime.fromtimestamp(numeric, tz=datetime_timezone.utc)
-
-    @classmethod
-    def _build_cloud_quote(cls, response_key, item):
-        symbol = str(getattr(item, "symbol", "") or "").strip().upper()
-        if not symbol or symbol == "NA":
-            symbol = str(response_key).split(":")[-1].split("|")[-1].strip().upper()
-        ohlc = getattr(item, "ohlc", None)
-        last_price = float(getattr(item, "last_price", 0) or 0)
-        net_change = float(getattr(item, "net_change", 0) or 0)
-        previous_close = last_price - net_change
-        if previous_close <= 0:
-            previous_close = float(getattr(ohlc, "close", 0) or 0)
-        if previous_close <= 0:
-            previous_close = last_price
-        change = net_change if net_change else last_price - previous_close
-        return {
-            "symbol": symbol,
-            "last_price": last_price,
-            "open_price": float(getattr(ohlc, "open", 0) or 0),
-            "high_price": float(getattr(ohlc, "high", 0) or 0),
-            "low_price": float(getattr(ohlc, "low", 0) or 0),
-            "previous_close": previous_close,
-            "change": change,
-            "change_percent": (change / previous_close * 100) if previous_close else 0,
-            "volume": int(getattr(item, "volume", 0) or 0),
-            "provider_timestamp": cls._parse_quote_timestamp(
-                getattr(item, "timestamp", None)
-            ),
-            "last_trade_time": cls._parse_last_trade_time(
-                getattr(item, "last_trade_time", None)
-            ),
-        }
-
-    def sync_quotes(self) -> int:
-        companies = list(Company.objects.filter(
-            exchange="NSE", is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
-            series="EQ",
-        ).exclude(upstox_instrument_key="").only(
-            "id", "symbol", "upstox_instrument_key"
+    def sync_quotes(self) -> dict[str, int]:
+        companies = list(Company.scanner_eligible().only(
+            "id", "symbol", "exchange", "name", "upstox_instrument_key"
         ))
-        by_symbol = {company.symbol: company for company in companies}
+        identities = {
+            company.upstox_instrument_key: (
+                company.symbol, company.exchange, company.name, company
+            )
+            for company in companies
+        }
+        identities.update({
+            key: (symbol, exchange, name, None)
+            for key, (symbol, exchange, name) in QuoteSyncService.INDEX_INSTRUMENTS.items()
+        })
         rows = []
-        for batch in self._chunks(companies, self.QUOTE_BATCH_SIZE):
-            response = self.quotes.quote(",".join(
-                company.upstox_instrument_key for company in batch
-            ))
-            for response_key, item in (getattr(response, "data", None) or {}).items():
-                parsed = self._build_cloud_quote(str(response_key), item)
-                company = by_symbol.get(parsed["symbol"])
-                if company is None or parsed["last_price"] <= 0:
+        index_quotes = []
+        counters = {
+            "requested": len(identities), "updated": 0, "skipped": 0,
+            "batches_failed": 0,
+        }
+        for batch in self._chunks(list(identities), self.QUOTE_BATCH_SIZE):
+            try:
+                response = self._request_quote_batch(batch)
+            except Exception:
+                counters["batches_failed"] += 1
+                counters["skipped"] += len(batch)
+                continue
+            data = getattr(response, "data", None) or {}
+            for instrument_key in batch:
+                symbol, exchange, name, company = identities[instrument_key]
+                response_key, item = QuoteSyncService._response_item_for_key(
+                    data, instrument_key, symbol
+                )
+                if item is None:
+                    counters["skipped"] += 1
                     continue
-                rows.append(CloudQuoteSnapshot(company=company, **{
-                    key: parsed[key] for key in (
-                        "last_price", "open_price", "high_price", "low_price",
-                        "previous_close", "change", "change_percent", "volume",
-                        "provider_timestamp", "last_trade_time",
+                try:
+                    parsed = QuoteNormalizer.normalize(
+                        response_key=str(response_key), item=item,
+                        instrument_key=instrument_key, symbol_hint=symbol,
+                        company=company, company_name=name, exchange=exchange,
                     )
-                }))
+                except Exception:
+                    counters["skipped"] += 1
+                    continue
+                if parsed["last_price"] <= 0:
+                    counters["skipped"] += 1
+                    continue
+                if company is None:
+                    index_quotes.append(parsed)
+                else:
+                    rows.append(CloudQuoteSnapshot(company=company, **{
+                        key: parsed[key] for key in (
+                            "last_price", "open_price", "high_price", "low_price",
+                            "previous_close", "change", "change_percent", "volume",
+                            "provider_timestamp", "last_trade_time", "market_status",
+                            "provider_state",
+                        )
+                    }))
         CloudQuoteSnapshot.objects.bulk_create(
             rows, batch_size=1_000, update_conflicts=True,
             unique_fields=["company"],
             update_fields=[
                 "last_price", "open_price", "high_price", "low_price",
                 "previous_close", "change", "change_percent", "volume",
-                "provider_timestamp", "last_trade_time",
+                "provider_timestamp", "last_trade_time", "market_status",
+                "provider_state",
             ],
         )
-        return len(rows)
+        if index_quotes:
+            MarketService.bulk_save(index_quotes)
+        counters["updated"] = len(rows) + len(index_quotes)
+        return counters
 
     @classmethod
     def prune_retention(cls) -> tuple[int, int]:
@@ -443,6 +524,7 @@ class CloudEODIngestionService:
     def run(self, *, history_limit: int = 0) -> CloudEODIngestionResult:
         result = CloudEODIngestionResult()
         result.active_instruments, result.suspended_instruments = self.refresh_instrument_mapping()
+        self._ensure_provider_clients()
         result.latest_session = self.resolve_latest_session()
         stock = self.sync_stock_history(result.latest_session, limit=history_limit)
         result.history_attempted = stock["attempted"]
@@ -453,6 +535,10 @@ class CloudEODIngestionService:
         result.provider_empty = stock["empty"]
         result.provider_failed = stock["failed"]
         result.benchmark_rows = self.sync_benchmark(result.latest_session)
-        result.quotes_updated = self.sync_quotes()
+        quote_result = self.sync_quotes()
+        result.quotes_updated = quote_result["updated"]
+        result.quotes_requested = quote_result["requested"]
+        result.quotes_skipped = quote_result["skipped"]
+        result.quote_batches_failed = quote_result["batches_failed"]
         result.candles_pruned, result.benchmark_pruned = self.prune_retention()
         return result

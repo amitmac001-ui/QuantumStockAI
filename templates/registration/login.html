@@ -1,0 +1,33 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Sign in · QuantumStock AI{% endblock %}
+
+{% block content %}
+<section class="login-shell">
+    <div class="login-brand">
+        <span class="brand__mark">Q</span>
+        <span>QuantumStock <strong>AI</strong></span>
+    </div>
+    <div class="login-card">
+        <p class="eyebrow">Secure research workspace</p>
+        <h1>Welcome back</h1>
+        <p class="muted">Sign in to open the persisted market and scanner dashboard.</p>
+
+        <form method="post" class="login-form" novalidate>
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next }}">
+            {% if form.non_field_errors %}
+                <div class="form-error" role="alert">{{ form.non_field_errors|striptags }}</div>
+            {% endif %}
+            <label for="id_username">Email</label>
+            <input id="id_username" name="username" type="email" autocomplete="email" required autofocus value="{{ form.username.value|default:'' }}">
+            {% if form.username.errors %}<p class="field-error">{{ form.username.errors|striptags }}</p>{% endif %}
+            <label for="id_password">Password</label>
+            <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+            {% if form.password.errors %}<p class="field-error">{{ form.password.errors|striptags }}</p>{% endif %}
+            <button type="submit" class="button button--primary button--full">Sign in</button>
+        </form>
+    </div>
+    <p class="login-disclaimer">Market data and research signals may be delayed or unavailable. Nothing shown is guaranteed investment advice.</p>
+</section>
+{% endblock %}

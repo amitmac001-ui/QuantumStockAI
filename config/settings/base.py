@@ -136,6 +136,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -270,7 +271,13 @@ TECHNICAL_SCANNER_PUBLISH_INTERVAL_SECONDS = int(
 TECHNICAL_SCANNER_STALE_AFTER_SECONDS = int(
     os.getenv("TECHNICAL_SCANNER_STALE_AFTER_SECONDS", "300")
 )
+MARKET_DATA_STALE_AFTER_SECONDS = int(
+    os.getenv("MARKET_DATA_STALE_AFTER_SECONDS", "300")
+)
 SCAN_REPORT_CACHE_PATH = os.getenv("SCAN_REPORT_CACHE_PATH", "")
+
+LOGIN_URL = "/login/"
+LOGIN_REDIRECT_URL = "/"
 
 ASGI_APPLICATION = "config.asgi.application"
 
@@ -278,7 +285,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")],
         },
     },
 }

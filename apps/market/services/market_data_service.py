@@ -45,6 +45,3 @@ class MarketDataService:
                 "status": "error",
                 "message": "Data Unavailable",
             }
-
-
-market_data_service = MarketDataService()

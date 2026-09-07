@@ -1,4 +1,6 @@
-from rest_framework.permissions import AllowAny
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.core.views.base import BaseAPIView
 from apps.scanner.serializers import (
@@ -63,14 +65,20 @@ class MostActiveAPIView(BaseAPIView):
 
 
 class ScannerAPIView(BaseAPIView):
-
-    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication, JWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, symbol):
 
         data = ScannerService.scan(symbol.upper())
 
-        serializer = ScanResultSerializer(data)
+        if data is None:
+            return self.error(
+                message="Validated scanner result unavailable for this symbol.",
+                status_code=404,
+            )
+
+        serializer = ScanResultSerializer(instance=data)
 
         return self.success(
             data=serializer.data,

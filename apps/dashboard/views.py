@@ -1,38 +1,33 @@
-import logging
-
+from django.contrib.auth.decorators import login_required
+from django.conf import settings
+from django.http import Http404
 from django.shortcuts import render
 
-from apps.market.services.market_data_service import MarketDataService
+from apps.dashboard.services.dashboard_service import DashboardService
+from apps.dashboard.services.stock_detail_service import StockDetailService
+from apps.companies.models import Company
 
-logger = logging.getLogger(__name__)
 
-
+@login_required
 def dashboard(request):
-    service = MarketDataService(
-        request.user if request.user.is_authenticated else None
-    )
-
-    indices = [
-        "NSE_INDEX|Nifty 50",
-        "NSE_INDEX|Nifty Bank",
-        "NSE_INDEX|Nifty Financial Services",
-    ]
-
-    market = None
-
-    try:
-        market = service.quote(indices)
-    except Exception as exc:
-        logger.exception(exc)
-        market = {
-            "status": "error",
-            "message": "Data Unavailable",
-        }
-
     return render(
         request,
-        "dashboard/index.html",
+        "pages/home.html",
+        DashboardService.dashboard_context(),
+    )
+
+
+@login_required
+def stock_detail(request, symbol):
+    try:
+        stock = StockDetailService.detail(symbol)
+    except Company.DoesNotExist as exc:
+        raise Http404("Stock not found") from exc
+    return render(
+        request,
+        "pages/stock_detail.html",
         {
-            "market": market,
+            "stock": stock,
+            "market_stale_after": settings.MARKET_DATA_STALE_AFTER_SECONDS,
         },
     )

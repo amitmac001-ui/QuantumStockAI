@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.scanner.services.scan_report_cache_service import ScanReportCacheService
 from apps.scanner.services.scanner_service import ScannerService
+from apps.core.services.scanner_data_readiness import ScannerDataReadinessService
 
 
 class Command(BaseCommand):
@@ -10,6 +11,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         cache = ScanReportCacheService()
         try:
+            readiness = ScannerDataReadinessService.collect(check_cache=False)
+            input_failures = ScannerDataReadinessService.failures(readiness)
+            if input_failures:
+                raise RuntimeError(
+                    "Scanner inputs are not ready: " + ",".join(input_failures)
+                )
             session = cache.latest_aligned_session()
             reports = ScannerService.scan_live_market()
             current = [
