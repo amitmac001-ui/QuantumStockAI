@@ -235,9 +235,20 @@ class CloudEODIngestionService:
         ]
 
     @staticmethod
+    def _deduplicate_rows(rows, key):
+        """Keep the last provider row for each conflict key, preserving key order."""
+        deduplicated = {}
+        for row in rows:
+            deduplicated[key(row)] = row
+        return list(deduplicated.values())
+
+    @staticmethod
     def _flush_stock_rows(rows: list[CloudDailyCandle]) -> tuple[int, int]:
         if not rows:
             return 0, 0
+        rows = CloudEODIngestionService._deduplicate_rows(
+            rows, lambda row: (row.company_id, row.session_date)
+        )
         keys = {(row.company_id, row.session_date) for row in rows}
         company_ids = {key[0] for key in keys}
         dates = {key[1] for key in keys}
@@ -361,6 +372,7 @@ class CloudEODIngestionService:
             volume=int(row.volume), provider_timestamp=row.provider_timestamp,
             data_quality_flags=row.data_quality_flags or [],
         ) for row in clean.itertuples(index=False)]
+        rows = self._deduplicate_rows(rows, lambda row: row.session_date)
         CloudBenchmarkCandle.objects.bulk_create(
             rows, batch_size=500, update_conflicts=True,
             unique_fields=["session_date"],

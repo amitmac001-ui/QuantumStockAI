@@ -288,6 +288,41 @@ class CloudCompactPersistenceTests(TestCase):
                 open=100, high=105, low=99, close=103, volume=1000,
             )
 
+    def test_stock_upsert_deduplicates_same_company_and_session(self):
+        session = date(2026, 8, 7)
+        rows = [
+            CloudDailyCandle(
+                company=self.active, session_date=session,
+                open=100, high=105, low=99, close=101, volume=1_000,
+            ),
+            CloudDailyCandle(
+                company=self.active, session_date=session,
+                open=100, high=106, low=98, close=104, volume=1_200,
+            ),
+        ]
+
+        created, updated = CloudEODIngestionService._flush_stock_rows(rows)
+
+        candle = CloudDailyCandle.objects.get(
+            company=self.active, session_date=session
+        )
+        self.assertEqual((created, updated), (1, 0))
+        self.assertEqual(candle.close, 104)
+        self.assertEqual(candle.volume, 1_200)
+
+    def test_benchmark_upsert_deduplicates_same_session(self):
+        service = self.service([
+            self.row(),
+            ["2026-08-07T00:00:00+05:30", 100, 106, 98, 104, 1200, 0],
+        ])
+
+        written = service.sync_benchmark(date(2026, 8, 7))
+
+        candle = CloudBenchmarkCandle.objects.get(session_date=date(2026, 8, 7))
+        self.assertEqual(written, 1)
+        self.assertEqual(candle.close, 104)
+        self.assertEqual(candle.volume, 1_200)
+
     def test_retention_keeps_only_272_sessions(self):
         sessions = pd.bdate_range("2025-01-01", periods=273)
         CloudDailyCandle.objects.bulk_create([
