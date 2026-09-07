@@ -32,6 +32,8 @@ def _snapshot(**overrides):
         "distinct_quote_instruments": 97,
         "stock_coverage": 0.96,
         "quote_coverage": 0.97,
+        "sufficient_history_instruments": 96,
+        "history_coverage": 0.96,
         "report_instruments": 91,
         "report_coverage": 0.91,
     }
@@ -79,6 +81,16 @@ class ScannerReadinessEvaluationTests(SimpleTestCase):
             ScannerDataReadinessService.failures(snapshot),
         )
 
+    def test_insufficient_252_session_history_fails_closed(self):
+        snapshot = _snapshot(
+            sufficient_history_instruments=10,
+            history_coverage=0.10,
+        )
+        self.assertIn(
+            "INSUFFICIENT_HISTORY_COVERAGE",
+            ScannerDataReadinessService.failures(snapshot),
+        )
+
     def test_healthy_percentage_coverage_passes(self):
         self.assertEqual(ScannerDataReadinessService.failures(_snapshot()), [])
 
@@ -92,6 +104,10 @@ class ScannerReadinessDistinctCountTests(TestCase):
             exchange="NSE",
             name=symbol,
             upstox_instrument_key=f"NSE_EQ|{symbol}",
+            provider_segment="NSE_EQ",
+            provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
             is_active=active,
             series="EQ",
             instrument_status=(
@@ -155,4 +171,42 @@ class ScannerReadinessDistinctCountTests(TestCase):
         self.assertEqual(snapshot.distinct_quote_instruments, 2)
         self.assertEqual(snapshot.stock_coverage, 1.0)
         self.assertEqual(snapshot.quote_coverage, 1.0)
-        self.assertEqual(ScannerDataReadinessService.failures(snapshot), [])
+        self.assertEqual(snapshot.sufficient_history_instruments, 0)
+        self.assertEqual(snapshot.history_coverage, 0.0)
+        self.assertEqual(
+            ScannerDataReadinessService.failures(snapshot),
+            ["INSUFFICIENT_HISTORY_COVERAGE"],
+        )
+
+    def test_history_coverage_excludes_only_proven_new_listings(self):
+        latest = date(2026, 8, 20)
+        old = self._company("OLDCO")
+        new = self._company("NEWCO")
+        old.listing_date = latest - timedelta(days=400)
+        old.save(update_fields=["listing_date"])
+        new.listing_date = latest - timedelta(days=9)
+        new.save(update_fields=["listing_date"])
+        for offset in range(252):
+            self._candle(old, latest - timedelta(days=offset))
+        for offset in range(10):
+            self._candle(new, latest - timedelta(days=offset))
+        self._quote(old)
+        self._quote(new)
+        CloudBenchmarkCandle.objects.create(
+            session_date=latest,
+            open=100,
+            high=102,
+            low=99,
+            close=101,
+            volume=1_000,
+        )
+
+        snapshot = ScannerDataReadinessService.collect(
+            now=datetime(2026, 8, 21, 10, 0, tzinfo=IST)
+        )
+
+        self.assertEqual(snapshot.active_eligible_instruments, 2)
+        self.assertEqual(snapshot.mature_eligible_instruments, 1)
+        self.assertEqual(snapshot.legitimately_new_instruments, 1)
+        self.assertEqual(snapshot.sufficient_history_instruments, 1)
+        self.assertEqual(snapshot.history_coverage, 1.0)

@@ -18,6 +18,8 @@ class MarketService:
         symbol = data["symbol"].upper()
 
         defaults = {
+            "company": data.get("company"),
+            "instrument_key": str(data.get("instrument_key", "") or ""),
             "company_name": data.get(
                 "company_name",
                 symbol,
@@ -53,8 +55,14 @@ class MarketService:
                 "market_status",
                 MarketStatus.CLOSED,
             ),
+            "provider_state": str(
+                data.get("provider_state", "DATA_UNAVAILABLE")
+            ),
             "last_trade_time": data.get(
                 "last_trade_time",
+            ),
+            "provider_timestamp": data.get(
+                "provider_timestamp",
             ),
         }
 
@@ -83,6 +91,8 @@ class MarketService:
             objects.append(
                 MarketQuote(
                     symbol=item["symbol"].upper(),
+                    company=item.get("company"),
+                    instrument_key=str(item.get("instrument_key", "") or ""),
                     exchange=item.get(
                         "exchange",
                         Exchange.NSE,
@@ -122,8 +132,14 @@ class MarketService:
                         "market_status",
                         MarketStatus.CLOSED,
                     ),
+                    provider_state=str(
+                        item.get("provider_state", "DATA_UNAVAILABLE")
+                    ),
                     last_trade_time=item.get(
                         "last_trade_time",
+                    ),
+                    provider_timestamp=item.get(
+                        "provider_timestamp",
                     ),
                 )
             )
@@ -137,6 +153,8 @@ class MarketService:
                 "exchange",
             ],
             update_fields=[
+                "company",
+                "instrument_key",
                 "company_name",
                 "last_price",
                 "open_price",
@@ -148,7 +166,9 @@ class MarketService:
                 "volume",
                 "traded_value",
                 "market_status",
+                "provider_state",
                 "last_trade_time",
+                "provider_timestamp",
                 "updated_at",
             ],
         )

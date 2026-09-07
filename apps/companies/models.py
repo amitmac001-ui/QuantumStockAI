@@ -10,6 +10,13 @@ class Company(models.Model):
         INACTIVE = "inactive", "Inactive"
         INVALID = "invalid", "Invalid instrument"
 
+    class SecurityCategory(models.TextChoices):
+        OPERATING_EQUITY = "operating_equity", "Operating-company equity"
+        ETF = "etf", "Exchange-traded fund"
+        DEBT = "debt", "Debt or government security"
+        OTHER = "other", "Other security"
+        UNKNOWN = "unknown", "Unclassified"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -53,6 +60,27 @@ class Company(models.Model):
         max_length=20,
         blank=True,
     )
+
+    provider_segment = models.CharField(max_length=30, blank=True, db_index=True)
+
+    provider_instrument_type = models.CharField(
+        max_length=30, blank=True, db_index=True
+    )
+
+    provider_security_type = models.CharField(
+        max_length=30, blank=True, db_index=True
+    )
+
+    security_category = models.CharField(
+        max_length=30,
+        choices=SecurityCategory.choices,
+        default=SecurityCategory.UNKNOWN,
+        db_index=True,
+    )
+
+    history_sync_last_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    history_sync_last_success_session = models.DateField(null=True, blank=True, db_index=True)
 
     sector = models.CharField(
         max_length=100,
@@ -143,4 +171,18 @@ class Company(models.Model):
             self.is_active
             and self.instrument_status == self.InstrumentStatus.ACTIVE
             and str(self.upstox_instrument_key or "").strip()
+            and self.provider_segment == "NSE_EQ"
+            and self.security_category == self.SecurityCategory.OPERATING_EQUITY
+            and self.provider_security_type in {"", "NORMAL"}
         )
+
+    @classmethod
+    def scanner_eligible(cls):
+        return cls.objects.filter(
+            exchange="NSE",
+            is_active=True,
+            instrument_status=cls.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ",
+            security_category=cls.SecurityCategory.OPERATING_EQUITY,
+            provider_security_type__in=("", "NORMAL"),
+        ).exclude(upstox_instrument_key="")

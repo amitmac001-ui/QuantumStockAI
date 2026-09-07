@@ -302,6 +302,8 @@ class StockSnapshot:
     pivot_quality_flags: list[str] = field(default_factory=list)
 
     base_duration_sessions: int | None = None
+    base_high: float | None = None
+    base_low: float | None = None
     base_depth_pct: float | None = None
     base_quality_score: int | None = None
     progressively_smaller_contractions: bool | None = None
@@ -737,6 +739,8 @@ class StockSnapshot:
                 None if data.get("base_duration_sessions") is None
                 else _safe_int(data.get("base_duration_sessions"))
             ),
+            base_high=_optional_float(data.get("base_high")),
+            base_low=_optional_float(data.get("base_low")),
             base_depth_pct=_optional_float(data.get("base_depth_pct")),
             base_quality_score=(
                 None if data.get("base_quality_score") is None

@@ -31,6 +31,10 @@ class ScannerUniverseAuditTests(TestCase):
             is_active=active,
             instrument_status=status,
             series=series,
+            provider_segment="NSE_EQ" if key.startswith("NSE_EQ|") else "",
+            provider_instrument_type=series,
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
         )
 
     @staticmethod

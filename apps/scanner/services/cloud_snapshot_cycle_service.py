@@ -115,13 +115,7 @@ class CloudSnapshotCycleService:
         evaluation = self._database_phase(
             PreBreakoutOutcomeService.evaluate_pending
         )
-        active = self._database_phase(
-            lambda: Company.objects.filter(
-                exchange="NSE", is_active=True,
-                instrument_status=Company.InstrumentStatus.ACTIVE,
-                series="EQ",
-            ).exclude(upstox_instrument_key="").count()
-        )
+        active = self._database_phase(lambda: Company.scanner_eligible().count())
         fully_attempted = current_histories + ingestion.provider_empty + ingestion.provider_failed >= active
         if benchmark_ready and current_histories >= active:
             status = "HEALTHY"

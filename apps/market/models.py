@@ -24,6 +24,16 @@ class MarketQuote(models.Model):
 
     symbol = models.CharField(max_length=30, db_index=True)
 
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.SET_NULL,
+        related_name="market_quotes",
+        null=True,
+        blank=True,
+    )
+
+    instrument_key = models.CharField(max_length=100, blank=True, db_index=True)
+
     exchange = models.CharField(
         max_length=10,
         choices=Exchange.choices,
@@ -54,6 +64,12 @@ class MarketQuote(models.Model):
         max_length=20,
         choices=MarketStatus.choices,
         default=MarketStatus.CLOSED,
+        db_index=True,
+    )
+
+    provider_state = models.CharField(
+        max_length=30,
+        default="DATA_UNAVAILABLE",
         db_index=True,
     )
 
@@ -249,6 +265,17 @@ class CloudQuoteSnapshot(models.Model):
     volume = models.BigIntegerField(default=0)
     provider_timestamp = models.DateTimeField(null=True, blank=True)
     last_trade_time = models.DateTimeField(null=True, blank=True)
+    market_status = models.CharField(
+        max_length=20,
+        choices=MarketStatus.choices,
+        default=MarketStatus.CLOSED,
+        db_index=True,
+    )
+    provider_state = models.CharField(
+        max_length=30,
+        default="DATA_UNAVAILABLE",
+        db_index=True,
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     @property

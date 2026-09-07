@@ -9,6 +9,8 @@ import pandas as pd
 @dataclass(slots=True)
 class BaseQualityFeatures:
     base_duration_sessions: int | None = None
+    base_high: float | None = None
+    base_low: float | None = None
     base_depth_pct: float | None = None
     base_quality_score: int | None = None
     progressively_smaller_contractions: bool | None = None
@@ -45,9 +47,14 @@ class BaseQualityFeatureExtractor:
         if pivot_level is not None and float(pivot_level) > 0:
             pivot_level = float(pivot_level)
             within_base = base.loc[base["close"] <= pivot_level * 1.03]
-            result.base_duration_sessions = len(within_base)
-            base_low = float(base["low"].min())
-            result.base_depth_pct = round((pivot_level - base_low) / pivot_level * 100, 4)
+            if not within_base.empty:
+                result.base_duration_sessions = len(within_base)
+                result.base_high = round(float(within_base["high"].max()), 4)
+                result.base_low = round(float(within_base["low"].min()), 4)
+                result.base_depth_pct = round(
+                    (pivot_level - result.base_low) / pivot_level * 100,
+                    4,
+                )
             high_52 = float(clean.tail(252)["high"].max())
             result.overhead_resistance_pct = round(max(high_52 - pivot_level, 0) / pivot_level * 100, 4)
             result.overhead_resistance_clear = result.overhead_resistance_pct <= 5.0

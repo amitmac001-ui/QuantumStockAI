@@ -4,6 +4,7 @@ import requests
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import redirect
+from django.utils import timezone
 
 from apps.upstox_auth.services.oauth_service import oauth_service
 
@@ -69,10 +70,15 @@ def callback(request):
     if "access_token" not in data:
         return JsonResponse(data, status=400)
 
+    expires_in = int(data.get("expires_in") or 0)
+    expires_at = (
+        timezone.now() + timezone.timedelta(seconds=expires_in)
+        if expires_in else None
+    )
     oauth_service.save_tokens(
         access_token=data["access_token"],
         refresh_token=data.get("refresh_token"),
-        expires_at=None,
+        expires_at=expires_at,
     )
 
     return JsonResponse(

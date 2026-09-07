@@ -1,114 +1,12 @@
-<aside
-x-data="{ open:false }">
-
-<div
-x-show="open"
-x-transition.opacity
-class="fixed inset-0 z-40 bg-black/60"
-@click="open=false">
-</div>
-
-<div
-x-show="open"
-x-transition:enter="transition duration-300"
-x-transition:enter-start="-translate-x-full"
-x-transition:enter-end="translate-x-0"
-class="fixed left-0 top-0 z-50 h-screen w-72 overflow-y-auto border-r border-slate-800 bg-[#0B1220]">
-
-<div class="flex items-center justify-between p-5">
-
-<h2 class="text-lg font-semibold">
-
-Menu
-
-</h2>
-
-<button
-@click="open=false"
-class="rounded-lg border border-slate-700 px-3 py-2">
-
-✕
-
-</button>
-
-</div>
-
-<nav class="px-4 pb-8">
-
-<a href="/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-🏠
-
-<span>Home</span>
-
-</a>
-
-<a href="/market/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-📈
-
-<span>Markets</span>
-
-</a>
-
-<a href="/scanner/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-🔍
-
-<span>Scanner</span>
-
-</a>
-
-<a href="/companies/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-🏢
-
-<span>Companies</span>
-
-</a>
-
-<a href="/portfolio/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-💼
-
-<span>Portfolio</span>
-
-</a>
-
-<a href="/watchlist/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-⭐
-
-<span>Watchlist</span>
-
-</a>
-
-<a href="/news/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-📰
-
-<span>News</span>
-
-</a>
-
-<a href="/settings/"
-class="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-slate-800">
-
-⚙️
-
-<span>Settings</span>
-
-</a>
-
-</nav>
-
-</div>
-
+<div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+<aside class="drawer" id="app-drawer" aria-label="Primary navigation" aria-hidden="true">
+    <div class="drawer__header">
+        <strong>QuantumStock</strong>
+        <button class="icon-button" id="menu-close" type="button" aria-label="Close navigation">×</button>
+    </div>
+    <nav class="drawer__nav">
+        <a href="{% url 'dashboard:home' %}" aria-current="page">Dashboard</a>
+        <a href="{% url 'swagger-ui' %}">API documentation</a>
+    </nav>
+    <p class="drawer__note">Research signals are decision-support information, not guaranteed investment advice.</p>
 </aside>

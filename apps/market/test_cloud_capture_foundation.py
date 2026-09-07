@@ -12,6 +12,7 @@ from apps.market.models import CloudBenchmarkCandle, CloudDailyCandle
 from apps.market.providers.historical_client import HistoricalClient
 from apps.market.providers.upstox_client import UpstoxClient
 from apps.market.services.cloud_eod_ingestion_service import CloudEODIngestionService
+from apps.market.services.quote_normalizer import QuoteNormalizer
 from apps.scanner.models import PreBreakoutSetupOutcome
 from apps.scanner.services.cloud_snapshot_cycle_service import CloudSnapshotCycleService
 from apps.scanner.services.prebreakout_outcome_service import PreBreakoutOutcomeService
@@ -74,7 +75,10 @@ class ReadOnlyProviderTests(SimpleTestCase):
             last_trade_time=1786096800000,
             ohlc=SimpleNamespace(open=101, high=106, low=100, close=100),
         )
-        parsed = CloudEODIngestionService._build_cloud_quote("NSE_EQ:ACTIVE", item)
+        parsed = QuoteNormalizer.normalize(
+            response_key="NSE_EQ:ACTIVE", item=item,
+            instrument_key="NSE_EQ|ACTIVE", symbol_hint="ACTIVE",
+        )
         self.assertEqual(parsed["symbol"], "ACTIVE")
         self.assertEqual(parsed["previous_close"], 100)
         self.assertEqual(parsed["change_percent"], 5)
@@ -101,12 +105,18 @@ class CloudCompactPersistenceTests(TestCase):
             upstox_instrument_key="NSE_EQ|ACTIVE", is_active=True,
             series="EQ",
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
         )
         self.suspended = Company.objects.create(
             symbol="SUSP", exchange="NSE", name="Suspended", isin="INE000000002",
             upstox_instrument_key="NSE_EQ|SUSP", is_active=False,
             series="EQ",
             instrument_status=Company.InstrumentStatus.SUSPENDED,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
         )
 
     @staticmethod
@@ -134,9 +144,9 @@ class CloudCompactPersistenceTests(TestCase):
             {
                 "segment": "NSE_EQ",
                 "name": f"Company {index}",
-                "isin": f"INTEST{index:06d}",
+                "isin": f"INE{index:09d}",
                 "instrument_type": "EQ",
-                "instrument_key": f"NSE_EQ|INTEST{index:06d}",
+                "instrument_key": f"NSE_EQ|INE{index:09d}",
                 "trading_symbol": f"EQ{index:04d}",
             }
             for index in range(999)
@@ -180,6 +190,9 @@ class CloudCompactPersistenceTests(TestCase):
             isin="INE000000003", upstox_instrument_key="NSE_EQ|OLDER",
             is_active=True, series="EQ",
             instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
         )
         CloudDailyCandle.objects.create(
             company=self.active, session_date=date(2026, 8, 6),
@@ -195,11 +208,32 @@ class CloudCompactPersistenceTests(TestCase):
 
         self.assertEqual(service.historical.calls, ["NSE_EQ|OLDER"])
 
+    def test_current_active_master_wins_over_historical_suspended_archive(self):
+        service = self.service([])
+        service.MINIMUM_INSTRUMENT_MASTER_ROWS = 1
+        active_row = {
+            "segment": "NSE_EQ", "trading_symbol": "ALPHA",
+            "isin": "INE002A01018", "instrument_key": "NSE_EQ|INE002A01018",
+            "instrument_type": "EQ", "security_type": "NORMAL",
+            "name": "Alpha Limited",
+        }
+        with patch.object(
+            service, "_download_json_gzip", side_effect=[[active_row], [active_row]]
+        ):
+            eligible, suspended = service.refresh_instrument_mapping()
+        alpha = Company.objects.get(symbol="ALPHA")
+        self.assertEqual(eligible, 1)
+        self.assertEqual(suspended, 0)
+        self.assertTrue(alpha.is_active)
+        self.assertEqual(alpha.instrument_status, Company.InstrumentStatus.ACTIVE)
+        self.assertEqual(
+            alpha.security_category, Company.SecurityCategory.OPERATING_EQUITY
+        )
+
     def test_empty_response_never_fabricates_a_candle(self):
         result = self.service([]).sync_stock_history(date(2026, 8, 7), limit=10)
         self.assertEqual(result["empty"], 1)
         self.assertEqual(CloudDailyCandle.objects.count(), 0)
-
 
     def test_full_seed_persists_compact_three_year_high_summary(self):
         sessions = pd.bdate_range(end="2026-08-07", periods=500)
@@ -217,6 +251,25 @@ class CloudCompactPersistenceTests(TestCase):
         self.assertEqual(
             self.active.three_year_high_session, sessions[-1].date()
         )
+
+    def test_history_limit_rotates_past_first_500_after_empty_responses(self):
+        Company.objects.bulk_create([
+            Company(
+                symbol=f"S{index:03d}", exchange="NSE", name=f"Stock {index}",
+                isin=f"INE{index:09d}"[-12:],
+                upstox_instrument_key=f"NSE_EQ|S{index:03d}",
+                provider_segment="NSE_EQ", provider_instrument_type="EQ",
+                provider_security_type="NORMAL",
+                security_category=Company.SecurityCategory.OPERATING_EQUITY,
+            )
+            for index in range(500)
+        ])
+        service = self.service([])
+        first = service.sync_stock_history(date(2026, 8, 7), limit=500)
+        second = service.sync_stock_history(date(2026, 8, 7), limit=1)
+        self.assertEqual(first["attempted"], 500)
+        self.assertEqual(second["attempted"], 1)
+        self.assertEqual(service.historical.calls[-1], "NSE_EQ|S499")
 
     def test_session_normalization_and_duplicate_key(self):
         clean = self.service([]).history._clean_frame(
@@ -283,8 +336,6 @@ class CloudCompactPersistenceTests(TestCase):
         from apps.market.services.benchmark_history_service import BenchmarkHistoryService
         frame = BenchmarkHistoryService.load_ohlcv_frame()
         self.assertEqual(frame.iloc[-1]["timestamp"], date(2026, 8, 7))
-
-
 class CloudSnapshotDatabaseReconnectTests(SimpleTestCase):
     @patch("apps.scanner.services.cloud_snapshot_cycle_service.close_old_connections")
     @patch("apps.scanner.services.cloud_snapshot_cycle_service.connection.close")

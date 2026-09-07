@@ -1,10 +1,14 @@
 import csv
+from datetime import datetime
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.companies.models import Company
+from apps.companies.services.instrument_classification import (
+    InstrumentClassificationService,
+)
 
 
 class Command(BaseCommand):
@@ -90,10 +94,34 @@ class Command(BaseCommand):
                     or None
                 )
 
+                listing_date_value = (
+                    row.get("DATE OF LISTING")
+                    or ""
+                ).strip().upper()
+                listing_date = None
+                if listing_date_value:
+                    try:
+                        listing_date = datetime.strptime(
+                            listing_date_value,
+                            "%d-%b-%Y",
+                        ).date()
+                    except ValueError as exc:
+                        raise CommandError(
+                            f"Invalid DATE OF LISTING for {symbol}."
+                        ) from exc
+
                 instrument_key = (
                     f"NSE_EQ|{isin}"
                     if isin
                     else ""
+                )
+
+                provider_segment = "NSE_EQ"
+                security_category = InstrumentClassificationService.classify(
+                    segment=provider_segment,
+                    instrument_type=series,
+                    security_type="",
+                    isin=isin,
                 )
 
                 _, created_flag = Company.objects.update_or_create(
@@ -104,8 +132,13 @@ class Command(BaseCommand):
                         "isin": isin,
                         "upstox_instrument_key": instrument_key,
                         "series": series,
+                        "provider_segment": provider_segment,
+                        "provider_instrument_type": series,
+                        "provider_security_type": "",
+                        "security_category": security_category,
                         "sector": sector,
                         "industry": industry,
+                        "listing_date": listing_date,
                         "face_value": face_value,
                         "is_active": True,
                     },

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Count, Max
 from django.utils import timezone
 
 from apps.companies.models import Company
@@ -59,6 +59,7 @@ class DailyHistorySyncService:
     SAMPLE_SYMBOLS = ("ATHERENERG", "DMART", "ALLCARGO", "FEDERALBNK", "ACSTECH")
     PROVIDER_INTERVAL = "day"
     INITIAL_LOOKBACK_DAYS = 420
+    MIN_HISTORY_SESSIONS = 252
     SESSION_DISCOVERY_DAYS = 21
     MARKET_CLOSE_GRACE = datetime_time(16, 0)
     MAX_RETRIES = 3
@@ -230,6 +231,18 @@ class DailyHistorySyncService:
         )
         return {(row["symbol"], row["exchange"]): row["latest"] for row in rows}
 
+    @staticmethod
+    def _history_count_map() -> dict[tuple[str, str], int]:
+        rows = (
+            MarketOHLC.objects.filter(interval=MarketOHLC.Interval.D1)
+            .values("symbol", "exchange")
+            .annotate(sessions=Count("candle_time", distinct=True))
+        )
+        return {
+            (row["symbol"], row["exchange"]): row["sessions"]
+            for row in rows
+        }
+
     @classmethod
     @transaction.atomic
     def persist_stock_frame(
@@ -345,12 +358,12 @@ class DailyHistorySyncService:
             ).only("instrument_status")
         )
         companies = list(
-            universe.filter(
-                is_active=True,
-                instrument_status=Company.InstrumentStatus.ACTIVE,
+            Company.scanner_eligible()
+            .filter(id__in=universe.values("id"))
+            .only(
+                "symbol", "exchange", "upstox_instrument_key",
+                "history_sync_last_attempt_at", "history_sync_last_success_session",
             )
-            .only("symbol", "exchange", "upstox_instrument_key")
-            .order_by("symbol")
         )
         result = DailyHistorySyncResult(
             eligible_stocks=len(companies),
@@ -366,6 +379,7 @@ class DailyHistorySyncService:
             ),
         )
         latest_by_key = self._latest_map()
+        history_count_by_key = self._history_count_map()
         stale_dates = [
             self.session_date(latest_by_key[(company.symbol, company.exchange)])
             for company in companies
@@ -375,8 +389,29 @@ class DailyHistorySyncService:
         ]
         result.oldest_stale_date = min(stale_dates) if stale_dates else None
 
-        processable = companies[:limit] if limit > 0 else companies
+        pending = [
+            company for company in companies
+            if (
+                not self.is_fresh(
+                    latest_by_key.get((company.symbol, company.exchange)),
+                    latest_session,
+                )
+                or history_count_by_key.get(
+                    (company.symbol, company.exchange), 0
+                ) < self.MIN_HISTORY_SESSIONS
+            )
+        ]
+        result.already_current = len(companies) - len(pending)
+        pending.sort(key=lambda company: (
+            company.history_sync_last_attempt_at is not None,
+            company.history_sync_last_attempt_at or datetime.min.replace(tzinfo=IST),
+            company.symbol,
+        ))
+        processable = pending[:limit] if limit > 0 else pending
+        attempted_companies = []
         for index, company in enumerate(processable, start=1):
+            company.history_sync_last_attempt_at = timezone.now()
+            attempted_companies.append(company)
             instrument_key = str(company.upstox_instrument_key or "").strip()
             if not instrument_key:
                 result.stocks_without_instrument_key += 1
@@ -386,15 +421,13 @@ class DailyHistorySyncService:
 
             key = (company.symbol, company.exchange)
             latest = latest_by_key.get(key)
-            if self.is_fresh(latest, latest_session):
-                result.already_current += 1
-                if progress:
-                    progress(index, len(processable), result)
-                continue
-
             start = (
                 self.session_date(latest) + timedelta(days=1)
-                if latest
+                if (
+                    latest
+                    and history_count_by_key.get(key, 0)
+                    >= self.MIN_HISTORY_SESSIONS
+                )
                 else latest_session - timedelta(days=self.INITIAL_LOOKBACK_DAYS)
             )
             try:
@@ -419,6 +452,7 @@ class DailyHistorySyncService:
                     latest_by_key[key] = self.canonical_session_timestamp(
                         max(clean["session_date"])
                     )
+                    company.history_sync_last_success_session = max(clean["session_date"])
             except Exception as exc:
                 result.stocks_failed += 1
                 if self._status_code(exc) in {400, 404, 422}:
@@ -427,6 +461,13 @@ class DailyHistorySyncService:
 
             if progress:
                 progress(index, len(processable), result)
+
+        if attempted_companies:
+            Company.objects.bulk_update(
+                attempted_companies,
+                ["history_sync_last_attempt_at", "history_sync_last_success_session"],
+                batch_size=1_000,
+            )
 
         result.remaining_stale_stocks = sum(
             latest_by_key.get((company.symbol, company.exchange)) is not None

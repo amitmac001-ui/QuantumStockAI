@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     MostActiveAPIView,
+    ScannerAPIView,
     TopGainersAPIView,
     TopLosersAPIView,
 )
@@ -26,6 +27,12 @@ urlpatterns = [
         "most-active/",
         MostActiveAPIView.as_view(),
         name="most_active",
+    ),
+
+    path(
+        "<str:symbol>/",
+        ScannerAPIView.as_view(),
+        name="symbol_scan",
     ),
 
 ]

@@ -67,10 +67,8 @@ class CloudOutcomeCycleService:
 
     @staticmethod
     def _company_keys(symbols: set[str]) -> dict[tuple[str, str], str]:
-        rows = Company.objects.filter(
+        rows = Company.scanner_eligible().filter(
             symbol__in=symbols,
-            is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
         ).values("symbol", "exchange", "upstox_instrument_key")
         return {
             (str(row["symbol"]).upper(), str(row["exchange"]).upper()): str(

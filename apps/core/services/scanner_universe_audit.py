@@ -166,7 +166,8 @@ class ScannerUniverseAuditService:
             "current_eligibility": {
                 "rule": (
                     "exchange=NSE,is_active=true,instrument_status=active,"
-                    "instrument_key_not_empty"
+                    "provider_segment=NSE_EQ,security_category=operating_equity,"
+                    "provider_security_type in [blank,NORMAL],instrument_key_not_empty"
                 ),
                 "company_rows_matching_rule": eligible_count,
                 "distinct_symbols_matching_rule": (
@@ -212,15 +213,19 @@ class ScannerUniverseAuditService:
             "classification_evidence": {
                 "persisted_exchange": True,
                 "persisted_series": True,
-                "persisted_source_segment": False,
-                "persisted_dedicated_instrument_type": False,
-                "persisted_security_category": False,
-                "schema_can_prove_company_equity_universe": False,
-                "blocker": (
-                    "Company.series is populated from NSE CSV SERIES or Upstox "
-                    "instrument_type; source segment and a dedicated security "
-                    "category are not persisted. Exact company-equity classification "
-                    "cannot be reconstructed safely from stored fields alone."
+                "persisted_source_segment": True,
+                "persisted_dedicated_instrument_type": True,
+                "persisted_provider_security_type": True,
+                "persisted_security_category": True,
+                "schema_can_prove_company_equity_universe": True,
+                "security_category_counts": cls._group_counts(
+                    companies, "security_category"
+                ),
+                "provider_segment_counts": cls._group_counts(
+                    companies, "provider_segment"
+                ),
+                "provider_security_type_counts": cls._group_counts(
+                    companies, "provider_security_type"
                 ),
             },
         }

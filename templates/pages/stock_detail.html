@@ -1,0 +1,170 @@
+{% extends "layouts/base.html" %}
+{% load static %}
+
+{% block title %}{{ stock.company.symbol }} X-Ray · QuantumStock AI{% endblock %}
+
+{% block content %}
+<div
+    class="xray-shell"
+    id="stock-xray-root"
+    data-symbol="{{ stock.company.symbol }}"
+    data-instrument-key="{{ stock.company.instrument_key|default:'' }}"
+    data-detail-api="{% url 'dashboard_api:stock-detail' symbol=stock.company.symbol %}"
+    data-search-api="{% url 'dashboard_api:search' %}"
+    data-stale-after="{{ market_stale_after }}"
+>
+    <nav class="xray-back" aria-label="Stock analysis navigation">
+        <a href="{% url 'dashboard:home' %}">← Back to dashboard</a>
+        <span id="xray-connection" class="connection-state" data-state="connecting">Connecting…</span>
+    </nav>
+
+    <header class="xray-header panel" data-market-symbol="{{ stock.company.symbol }}"{% if stock.company.instrument_key %} data-instrument-key="{{ stock.company.instrument_key }}"{% endif %}>
+        <div class="xray-identity">
+            <p class="eyebrow">Stock technical X-ray</p>
+            <h1>{{ stock.company.name }}</h1>
+            <div class="xray-identity__meta">
+                <strong>{{ stock.company.symbol }}</strong>
+                <span>{{ stock.company.exchange }}</span>
+                {% if stock.company.sector %}<span>{{ stock.company.sector }}</span>{% endif %}
+                {% if stock.company.industry %}<span>{{ stock.company.industry }}</span>{% endif %}
+            </div>
+            <div class="xray-state-row">
+                <span class="setup-state">{{ stock.scanner.lifecycle }}</span>
+                {% if stock.scanner.engine_classification %}<span class="engine-classification">{{ stock.scanner.engine_classification }}</span>{% endif %}
+                <span id="xray-market-status" class="status-pill status--{{ stock.quote.status|lower }}">{{ stock.quote.status }}</span>
+            </div>
+        </div>
+        <div class="xray-live-quote">
+            {% if stock.quote.price is not None %}
+                <p class="xray-live-quote__price">₹<span data-field="price">{{ stock.quote.price|floatformat:2 }}</span></p>
+                <p class="market-change {% if stock.quote.change_percent >= 0 %}positive{% else %}negative{% endif %}">
+                    <span data-field="change">{{ stock.quote.change|floatformat:2 }}</span>
+                    (<span data-field="change-percent">{{ stock.quote.change_percent|floatformat:2 }}</span>%)
+                </p>
+                <small data-field="timestamp">{{ stock.quote.provider_timestamp }}</small>
+            {% else %}
+                <p class="data-unavailable">DATA UNAVAILABLE</p>
+            {% endif %}
+        </div>
+        <dl class="xray-score-strip">
+            <div><dt>QuantumScore</dt><dd>{{ stock.scanner.metrics.quantum_score|default_if_none:"DATA UNAVAILABLE" }}</dd></div>
+            <div><dt>Pre-Breakout</dt><dd>{{ stock.scanner.metrics.prebreakout_score|default_if_none:"DATA UNAVAILABLE" }}</dd></div>
+            <div><dt>Scanner session</dt><dd>{{ stock.scanner.scanner_session|date:"d M Y"|default:"DATA UNAVAILABLE" }}</dd></div>
+        </dl>
+    </header>
+
+    <section class="xray-chart-panel panel" aria-labelledby="technical-chart-title">
+        <div class="xray-chart-heading">
+            <div>
+                <p class="eyebrow">Persisted daily OHLCV</p>
+                <h2 id="technical-chart-title">Price, volume and technical levels</h2>
+            </div>
+            <div class="range-controls" role="group" aria-label="Chart time range">
+                {% for range in stock.ranges %}
+                    <button type="button" data-range="{{ range }}"{% if range == stock.chart.range %} class="is-active" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ range }}</button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="indicator-controls" role="group" aria-label="Technical indicator overlays">
+            <label><input type="checkbox" data-overlay="ma50" checked> MA50</label>
+            <label><input type="checkbox" data-overlay="ma200" checked> MA200</label>
+            <label><input type="checkbox" data-overlay="pivot" checked> Pivot / resistance</label>
+            <label><input type="checkbox" data-overlay="support" checked> Support</label>
+            <label><input type="checkbox" data-overlay="markers" checked> Lifecycle markers</label>
+        </div>
+
+        <div class="xray-chart" id="xray-chart" data-status="{{ stock.chart.status }}">
+            {% if stock.chart.candles %}
+                <canvas id="xray-canvas" aria-label="Real daily candlestick and volume chart for {{ stock.company.symbol }}"></canvas>
+                <div class="chart-tooltip" id="xray-tooltip" hidden></div>
+            {% else %}
+                <div class="chart-empty" id="xray-chart-empty">
+                    <strong>DATA UNAVAILABLE</strong>
+                    <span>No persisted daily OHLC candles exist for this instrument.</span>
+                </div>
+            {% endif %}
+        </div>
+        <div class="chart-legend" aria-label="Chart legend">
+            <span class="legend-candle">Candles</span>
+            <span class="legend-volume">Volume</span>
+            <span class="legend-ma50">MA50</span>
+            <span class="legend-ma200">MA200</span>
+            <span class="legend-pivot">Pivot</span>
+            <span class="legend-support">Support</span>
+        </div>
+        <p class="chart-footnote"><span id="xray-candle-count">{{ stock.chart.count }}</span> real daily sessions · drag to pan · mouse wheel to zoom</p>
+    </section>
+
+    <section class="xray-grid">
+        <article class="panel" aria-labelledby="metrics-title">
+            <div class="section-heading section-heading--compact">
+                <h2 id="metrics-title">Scanner metrics</h2>
+                <span class="status-pill status--{{ stock.scanner.status|lower }}">{{ stock.scanner.status }}</span>
+            </div>
+            <dl class="xray-metrics">
+                <div><dt>RS Rating</dt><dd>{{ stock.scanner.metrics.rs_rating|default_if_none:"DATA UNAVAILABLE" }}</dd></div>
+                <div><dt>From Pivot</dt><dd>{% if stock.scanner.metrics.distance_from_pivot_percent is not None %}{{ stock.scanner.metrics.distance_from_pivot_percent|floatformat:2 }}%{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>ATR Tightening</dt><dd>{% if stock.scanner.metrics.atr_tightening is not None %}{{ stock.scanner.metrics.atr_tightening|yesno:"YES,NO" }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Volume Dry-up</dt><dd>{% if stock.scanner.metrics.volume_dry_up is not None %}{{ stock.scanner.metrics.volume_dry_up|yesno:"YES,NO" }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Up/Down Volume</dt><dd>{{ stock.scanner.metrics.up_down_volume_ratio|default_if_none:"DATA UNAVAILABLE" }}</dd></div>
+                <div><dt>Accumulation</dt><dd>{{ stock.scanner.metrics.accumulation_distribution_balance|default_if_none:"DATA UNAVAILABLE" }}</dd></div>
+                <div><dt>Below 52W High</dt><dd>{% if stock.scanner.metrics.distance_from_52w_high_percent is not None %}{{ stock.scanner.metrics.distance_from_52w_high_percent|floatformat:2 }}%{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Breakout Probability</dt><dd>{% if stock.scanner.metrics.breakout_probability is not None %}{{ stock.scanner.metrics.breakout_probability|floatformat:1 }}%{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Risk / Reward</dt><dd>{% if stock.scanner.metrics.risk_reward is not None %}1 : {{ stock.scanner.metrics.risk_reward|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Liquidity Score</dt><dd>{{ stock.scanner.metrics.liquidity_score|default_if_none:"DATA UNAVAILABLE" }}</dd></div>
+                <div><dt>Base Duration</dt><dd>{% if stock.scanner.metrics.base_duration_sessions is not None %}{{ stock.scanner.metrics.base_duration_sessions }} sessions{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Data Quality</dt><dd>{{ stock.scanner.metrics.data_quality_state|default:"DATA UNAVAILABLE" }}</dd></div>
+            </dl>
+        </article>
+
+        <article class="panel" aria-labelledby="levels-title">
+            <h2 id="levels-title">Setup levels and trade plan</h2>
+            <dl class="xray-levels">
+                <div><dt>Pivot</dt><dd>{% if stock.scanner.levels.pivot %}₹{{ stock.scanner.levels.pivot|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Resistance</dt><dd>{% if stock.scanner.levels.resistance %}₹{{ stock.scanner.levels.resistance|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Support</dt><dd>{% if stock.scanner.levels.support %}₹{{ stock.scanner.levels.support|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Base High / Low</dt><dd>{% if stock.scanner.levels.base_high and stock.scanner.levels.base_low %}₹{{ stock.scanner.levels.base_low|floatformat:2 }} – ₹{{ stock.scanner.levels.base_high|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Entry Zone</dt><dd>{% if stock.scanner.levels.entry_low and stock.scanner.levels.entry_high %}₹{{ stock.scanner.levels.entry_low|floatformat:2 }} – ₹{{ stock.scanner.levels.entry_high|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+                <div><dt>Stop Loss</dt><dd>{% if stock.scanner.levels.stop_loss %}₹{{ stock.scanner.levels.stop_loss|floatformat:2 }}{% else %}DATA UNAVAILABLE{% endif %}</dd></div>
+            </dl>
+            <div class="target-list">
+                <span>Targets</span>
+                {% for target in stock.scanner.levels.targets %}<strong>₹{{ target|floatformat:2 }}</strong>{% empty %}<strong>DATA UNAVAILABLE</strong>{% endfor %}
+            </div>
+        </article>
+    </section>
+
+    <section class="xray-grid">
+        <article class="panel evidence-panel evidence-panel--positive">
+            <h2>Positive Evidence</h2>
+            <div class="evidence-list">
+                {% for flag in stock.scanner.positive_evidence %}<span>{{ flag }}</span>{% empty %}<p>DATA UNAVAILABLE</p>{% endfor %}
+            </div>
+        </article>
+        <article class="panel evidence-panel evidence-panel--risk">
+            <h2>Risk Flags</h2>
+            <div class="evidence-list">
+                {% for flag in stock.scanner.risk_flags %}<span>{{ flag }}</span>{% empty %}<p>DATA UNAVAILABLE</p>{% endfor %}
+            </div>
+        </article>
+    </section>
+
+    <section class="panel xray-events" aria-labelledby="events-title">
+        <div>
+            <p class="eyebrow">Persisted events only</p>
+            <h2 id="events-title">Lifecycle timeline</h2>
+        </div>
+        <div class="event-list" id="xray-event-list">
+            {% for marker in stock.markers %}<span><time>{{ marker.date }}</time>{{ marker.state }}</span>{% empty %}<p>DATA UNAVAILABLE — no supported lifecycle event is persisted.</p>{% endfor %}
+        </div>
+    </section>
+
+    <p class="research-disclaimer">QuantumStock outputs are research signals, not guaranteed recommendations. Verify price, liquidity, risk and suitability independently before acting.</p>
+</div>
+{{ stock|json_script:"stock-xray-data" }}
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{% static 'js/stock_detail.js' %}" defer></script>
+{% endblock %}

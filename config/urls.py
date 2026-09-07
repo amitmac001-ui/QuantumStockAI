@@ -15,16 +15,17 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from django.urls import include, path
 from django.contrib import admin
+from django.core.cache import cache
+from django.db import connections
 from django.http import JsonResponse
-from apps.core.views import home
 from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
+from apps.accounts.web_views import website_login, website_logout
 
 
 def health_check(request):
@@ -37,19 +38,39 @@ def health_check(request):
     )
 
 
+def readiness_check(request):
+    checks = {"postgresql": False, "redis": False}
+    try:
+        with connections["default"].cursor() as cursor:
+            cursor.execute("SELECT 1")
+            checks["postgresql"] = cursor.fetchone() == (1,)
+    except Exception:
+        pass
+    try:
+        key = "health:readiness"
+        cache.set(key, "ok", timeout=10)
+        checks["redis"] = cache.get(key) == "ok"
+        cache.delete(key)
+    except Exception:
+        pass
+    ready = all(checks.values())
+    return JsonResponse(
+        {"status": "ready" if ready else "unavailable", "checks": checks},
+        status=200 if ready else 503,
+    )
+
+
 urlpatterns = [
 
-    path("", home),
+    path("login/", website_login, name="website-login"),
+    path("logout/", website_logout, name="website-logout"),
 
     path(
        "api/v1/dashboard/",
        include("apps.dashboard.api.urls"),
     ),
    
-    path(
-        "",
-       include("apps.dashboard.urls"),
-    ),
+    path("", include("apps.dashboard.urls")),
    
     path(
         "admin/",
@@ -64,6 +85,11 @@ urlpatterns = [
     path(
         "health/",
         health_check,
+    ),
+
+    path(
+        "ready/",
+        readiness_check,
     ),
 
     path(

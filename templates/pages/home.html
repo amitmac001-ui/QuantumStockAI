@@ -1,441 +1,203 @@
 {% extends "layouts/base.html" %}
+{% load static %}
 
-{% block title %}QuantumStock AI{% endblock %}
+{% block title %}Dashboard · QuantumStock AI{% endblock %}
 
 {% block content %}
+<div
+    class="dashboard-shell"
+    id="dashboard-root"
+    data-home-api="{% url 'dashboard_api:home' %}"
+    data-search-api="{% url 'dashboard_api:search' %}"
+    data-stale-after="300"
+>
+    <section class="dashboard-heading">
+        <div>
+            <p class="eyebrow">Market intelligence</p>
+            <h1>Good {{ request.user.first_name|default:"trader" }}, here is the market picture.</h1>
+        </div>
+        <div class="status-cluster">
+            <span class="status-pill status--{{ dashboard.meta.status|lower }}" id="market-state">{{ dashboard.meta.status }}</span>
+            <span class="connection-state" id="live-connection">REST snapshot</span>
+        </div>
+    </section>
 
-<div class="mx-auto max-w-md space-y-5 pb-24">
+    <section class="index-strip" aria-label="Market indices">
+        {% for index in dashboard.indices.items %}
+            <article
+                class="index-card"
+                data-market-symbol="{{ index.symbol|default:index.label }}"
+                data-instrument-key="{{ index.instrument_key }}"
+            >
+                <div class="index-card__top">
+                    <span>{{ index.label }}</span>
+                    <span class="status-dot status--{{ index.status|lower }}" data-field="status">{{ index.status }}</span>
+                </div>
+                {% if index.price is not None %}
+                    <strong>₹<span data-field="price">{{ index.price|floatformat:2 }}</span></strong>
+                    <span class="market-change {% if index.change_percent >= 0 %}positive{% else %}negative{% endif %}">
+                        <span data-field="change">{{ index.change|floatformat:2 }}</span>
+                        (<span data-field="change-percent">{{ index.change_percent|floatformat:2 }}</span>%)
+                    </span>
+                {% else %}
+                    <strong class="data-unavailable">DATA UNAVAILABLE</strong>
+                {% endif %}
+                <small data-field="timestamp">{{ index.freshness.provider_timestamp|default:index.freshness.reason }}</small>
+            </article>
+        {% endfor %}
+    </section>
 
-<section>
+    <section class="section-block" aria-labelledby="movers-title">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Market overview</p>
+                <h2 id="movers-title">Leadership, weakness and breadth</h2>
+            </div>
+            <span class="status-pill status--{{ dashboard.top_movers.status|lower }}">{{ dashboard.top_movers.status }}</span>
+        </div>
+        <div class="market-overview-grid">
+            <article class="panel">
+                <h3 class="positive">Top 5 gainers</h3>
+                <div class="market-list">
+                    {% for stock in dashboard.top_movers.gainers %}
+                        <div class="market-row" data-market-symbol="{{ stock.symbol }}"{% if stock.instrument_key %} data-instrument-key="{{ stock.instrument_key }}"{% endif %}>
+                            <div><strong>{{ stock.symbol }}</strong><small>{{ stock.company }}</small></div>
+                            <div class="numeric"><strong>₹<span data-field="price">{{ stock.price|floatformat:2 }}</span></strong><small class="positive"><span data-field="change-percent">{{ stock.change_percent|floatformat:2 }}</span>%</small></div>
+                        </div>
+                    {% empty %}
+                        <p class="empty-state">No fresh persisted gainer data.</p>
+                    {% endfor %}
+                </div>
+            </article>
+            <article class="panel">
+                <h3 class="negative">Top 5 losers</h3>
+                <div class="market-list">
+                    {% for stock in dashboard.top_movers.losers %}
+                        <div class="market-row" data-market-symbol="{{ stock.symbol }}"{% if stock.instrument_key %} data-instrument-key="{{ stock.instrument_key }}"{% endif %}>
+                            <div><strong>{{ stock.symbol }}</strong><small>{{ stock.company }}</small></div>
+                            <div class="numeric"><strong>₹<span data-field="price">{{ stock.price|floatformat:2 }}</span></strong><small class="negative"><span data-field="change-percent">{{ stock.change_percent|floatformat:2 }}</span>%</small></div>
+                        </div>
+                    {% empty %}
+                        <p class="empty-state">No fresh persisted loser data.</p>
+                    {% endfor %}
+                </div>
+            </article>
+            <article class="panel breadth-panel">
+                <div class="panel-heading-row">
+                    <h3>Market breadth</h3>
+                    <span class="status-pill status--{{ dashboard.breadth.status|lower }}">{{ dashboard.breadth.status }}</span>
+                </div>
+                <div class="breadth-grid">
+                    <div><strong class="positive">{{ dashboard.breadth.advances }}</strong><span>Advances</span></div>
+                    <div><strong class="negative">{{ dashboard.breadth.declines }}</strong><span>Declines</span></div>
+                    <div><strong>{{ dashboard.breadth.unchanged }}</strong><span>Unchanged</span></div>
+                    <div><strong>{{ dashboard.breadth.coverage_percent }}%</strong><span>Coverage</span></div>
+                </div>
+                <p class="coverage-note">{{ dashboard.breadth.covered_instruments }} / {{ dashboard.breadth.eligible_instruments }} eligible instruments covered.</p>
+            </article>
+        </div>
+    </section>
 
-<div class="mb-3 flex items-center justify-between">
+    <section class="stage-summary" aria-labelledby="stage-summary-title">
+        <div class="stage-summary__heading">
+            <div>
+                <p class="eyebrow">Scanner stage summary</p>
+                <h2 id="stage-summary-title">Setup pipeline</h2>
+            </div>
+            <span class="status-pill status--{{ dashboard.meta.scanner_stages.status|lower }}">{{ dashboard.meta.scanner_stages.status }}</span>
+        </div>
+        {% if dashboard.meta.scanner_stages.items %}
+            <div class="stage-tiles">
+                {% for stage in dashboard.meta.scanner_stages.items %}
+                    <div class="stage-tile">
+                        <strong>{{ stage.count }}</strong>
+                        <span>{{ stage.stage }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="stage-summary__empty">Validated scanner stage counts are unavailable for the current session.</p>
+        {% endif %}
+    </section>
 
-<h2 class="text-lg font-semibold">
+    <section class="section-block" aria-labelledby="priority-title">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Decision-engine research signals</p>
+                <h2 id="priority-title">QuantumStock Priority Stocks</h2>
+                <p class="muted">Ranked cached reports with QuantumScore 70 or higher.</p>
+            </div>
+            <span class="status-pill status--{{ dashboard.priority_stocks.status|lower }}">{{ dashboard.priority_stocks.status }}</span>
+        </div>
+        <div class="stock-card-grid">
+            {% for card in dashboard.priority_stocks.items %}
+                {% include "components/dashboard/stock_card.html" with card=card %}
+            {% empty %}
+                <div class="empty-state empty-state--large">No validated priority setups are available for the current scanner session.</div>
+            {% endfor %}
+        </div>
+    </section>
 
-Market Indices
+    <section class="section-block" aria-labelledby="prebreakout-title">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">PreBreakoutEngine</p>
+                <h2 id="prebreakout-title">Pre-Breakout Opportunities</h2>
+                <p class="muted">Only reports explicitly flagged as pre-breakout or breakout by the current engine.</p>
+            </div>
+            <span class="status-pill status--{{ dashboard.prebreakout_opportunities.status|lower }}">{{ dashboard.prebreakout_opportunities.status }}</span>
+        </div>
+        <div class="stock-card-grid">
+            {% for card in dashboard.prebreakout_opportunities.items %}
+                {% include "components/dashboard/stock_card.html" with card=card %}
+            {% empty %}
+                <div class="empty-state empty-state--large">No validated pre-breakout setups are available for the current scanner session.</div>
+            {% endfor %}
+        </div>
+    </section>
 
-</h2>
+    <section class="section-block" aria-label="Sector strength">
+        <article class="panel sector-panel">
+            <div class="section-heading section-heading--compact">
+                <h2>Sector Strength</h2>
+                <span class="status-pill status--{{ dashboard.sectors.status|lower }}">{{ dashboard.sectors.status }}</span>
+            </div>
+            <div class="sector-list">
+                {% for sector in dashboard.sectors.items|slice:":8" %}
+                    <div class="sector-row">
+                        <span>{{ sector.sector }}</span>
+                        <span>{{ sector.covered_instruments }} stocks</span>
+                        <strong class="{% if sector.average_change_percent >= 0 %}positive{% else %}negative{% endif %}">{{ sector.average_change_percent|floatformat:2 }}%</strong>
+                    </div>
+                {% empty %}
+                    <p class="empty-state">No valid, fresh sector aggregate is available.</p>
+                {% endfor %}
+            </div>
+            <p class="coverage-note">{{ dashboard.sectors.classified_instruments }} classified instruments within {{ dashboard.sectors.covered_instruments }} covered quotes.</p>
+        </article>
+    </section>
 
-<a
-href="/market/indices/"
-class="text-sm text-blue-500">
+    <section class="section-block panel information-panel" aria-labelledby="information-title">
+        <div>
+            <p class="eyebrow">Latest market information</p>
+            <h2 id="information-title">Source and freshness</h2>
+        </div>
+        <dl class="information-grid">
+            <div><dt>Market state</dt><dd>{{ dashboard.meta.status }}</dd></div>
+            <div><dt>Latest provider timestamp</dt><dd>{{ dashboard.meta.latest_provider_timestamp|default:"DATA UNAVAILABLE" }}</dd></div>
+            <div><dt>Scanner session</dt><dd>{{ dashboard.meta.latest_scanner_session|default:"DATA UNAVAILABLE" }}</dd></div>
+            <div><dt>Expected completed session</dt><dd>{{ dashboard.meta.expected_latest_completed_session }}</dd></div>
+            <div><dt>Holiday calendar</dt><dd>{{ dashboard.meta.holiday_calendar }}</dd></div>
+            <div><dt>News source</dt><dd>{{ dashboard.capabilities.news }}</dd></div>
+        </dl>
+        <p class="muted">{{ dashboard.meta.reason }} Exchange-holiday status is never fabricated.</p>
+    </section>
 
-View All
-
-</a>
-
+    <p class="research-disclaimer">QuantumStock outputs are research signals, not guaranteed recommendations. Verify price, liquidity, risk and suitability independently before acting.</p>
 </div>
-
-<div class="space-y-4">
-
-<div class="glass rounded-2xl p-4">
-
-<div class="flex items-start justify-between">
-
-<div>
-
-<h3 class="text-lg font-semibold">
-
-NIFTY 50
-
-</h3>
-
-<p class="mt-1 text-2xl font-bold">
-
-{{ nifty.last_price|default:"--" }}
-
-</p>
-
-<p class="mt-1 text-green-400">
-
-{{ nifty.change|default:"--" }}
-
-</p>
-
-</div>
-
-<div class="text-xs text-green-400">
-
-● LIVE
-
-</div>
-
-</div>
-
-<div class="mt-4 h-28">
-
-<canvas id="niftyChart"></canvas>
-
-</div>
-
-</div>
-
-<div class="glass rounded-2xl p-4">
-
-<div class="flex items-start justify-between">
-
-<div>
-
-<h3 class="text-lg font-semibold">
-
-SENSEX
-
-</h3>
-
-<p class="mt-1 text-2xl font-bold">
-
-{{ sensex.last_price|default:"--" }}
-
-</p>
-
-<p class="mt-1 text-green-400">
-
-{{ sensex.change|default:"--" }}
-
-</p>
-
-</div>
-
-<div class="text-xs text-green-400">
-
-● LIVE
-
-</div>
-
-</div>
-
-<div class="mt-4 h-28">
-
-<canvas id="sensexChart"></canvas>
-
-</div>
-
-</div>
-
-</div>
-
-</section>
-
-<section class="glass rounded-2xl p-5">
-
-<div class="flex items-center justify-between">
-
-<h2 class="text-lg font-semibold">
-
-AI Recommendation
-
-</h2>
-
-<span class="rounded-full bg-blue-900 px-3 py-1 text-xs">
-
-Beta
-
-</span>
-
-</div>
-
-<div class="mt-5">
-
-<h3 class="text-xl font-semibold">
-
-No Recommendation
-
-</h3>
-
-<p class="mt-2 text-sm text-slate-400">
-
-Waiting for validated live signals.
-
-</p>
-
-</div>
-
-</section>
-
-<section class="glass rounded-2xl p-5">
-
-<div class="flex items-center justify-between">
-
-<div>
-
-<h2 class="text-lg font-semibold">
-
-Watchlist
-
-</h2>
-
-<p class="mt-1 text-sm text-slate-400">
-
-No stocks added.
-
-</p>
-
-</div>
-
-<a
-href="/watchlist/add/"
-class="rounded-xl border border-blue-500 px-4 py-2 text-sm text-blue-500">
-
-Add Stock
-
-</a>
-
-</div>
-
-</section>
-
-<section class="grid grid-cols-2 gap-4">
-
-<div class="glass rounded-2xl p-4">
-
-<div class="mb-4 flex items-center justify-between">
-
-<h2 class="font-semibold text-green-400">
-
-↑ Top Gainers
-
-</h2>
-
-<a
-href="/market/gainers/"
-class="text-xs text-blue-500">
-
-View All
-
-</a>
-
-</div>
-
-{% for stock in top_gainers|slice:":5" %}
-
-<div class="mb-3 flex justify-between">
-
-<div>
-
-<div class="font-medium">
-
-{{ stock.symbol }}
-
-</div>
-
-<div class="text-xs text-slate-400">
-
-{{ stock.company_name }}
-
-</div>
-
-</div>
-
-<div class="text-right">
-
-<div>
-
-₹{{ stock.last_price }}
-
-</div>
-
-<div class="text-xs text-green-400">
-
-{{ stock.change_percent }}%
-
-</div>
-
-</div>
-
-</div>
-
-{% empty %}
-
-<p class="text-xs text-slate-500">
-
-No data
-
-</p>
-
-{% endfor %}
-
-</div>
-
-<div class="glass rounded-2xl p-4">
-
-<div class="mb-4 flex items-center justify-between">
-
-<h2 class="font-semibold text-red-400">
-
-↓ Top Losers
-
-</h2>
-
-<a
-href="/market/losers/"
-class="text-xs text-blue-500">
-
-View All
-
-</a>
-
-</div>
-
-{% for stock in top_losers|slice:":5" %}
-
-<div class="mb-3 flex justify-between">
-
-<div>
-
-<div class="font-medium">
-
-{{ stock.symbol }}
-
-</div>
-
-<div class="text-xs text-slate-400">
-
-{{ stock.company_name }}
-
-</div>
-
-</div>
-
-<div class="text-right">
-
-<div>
-
-₹{{ stock.last_price }}
-
-</div>
-
-<div class="text-xs text-red-400">
-
-{{ stock.change_percent }}%
-
-</div>
-
-</div>
-
-</div>
-
-{% empty %}
-
-<p class="text-xs text-slate-500">
-
-No data
-
-</p>
-
-{% endfor %}
-
-</div>
-
-</section>
-
-<section class="glass rounded-2xl p-5">
-
-<div class="mb-4 flex items-center justify-between">
-
-<h2 class="text-lg font-semibold">
-
-Latest News
-
-</h2>
-
-<a
-href="/news/"
-class="text-sm text-blue-500">
-
-View All
-
-</a>
-
-</div>
-
-<p class="text-sm text-slate-500">
-
-Live news integration coming from backend feed.
-
-</p>
-
-</section>
-
-</div>
-
-<script>
-
-new Chart(document.getElementById("niftyChart"),{
-
-type:"line",
-
-data:{
-
-labels:[1,2,3,4,5,6,7],
-
-datasets:[{
-
-data:[1,3,2,5,4,6,7],
-
-borderColor:"#22c55e",
-
-borderWidth:2,
-
-pointRadius:0,
-
-fill:false,
-
-tension:.4
-
-}]
-
-},
-
-options:{
-
-responsive:true,
-
-plugins:{legend:{display:false}},
-
-scales:{x:{display:false},y:{display:false}}
-
-}
-
-});
-
-new Chart(document.getElementById("sensexChart"),{
-
-type:"line",
-
-data:{
-
-labels:[1,2,3,4,5,6,7],
-
-datasets:[{
-
-data:[2,2.5,3,4,5,5.5,6],
-
-borderColor:"#22c55e",
-
-borderWidth:2,
-
-pointRadius:0,
-
-fill:false,
-
-tension:.4
-
-}]
-
-},
-
-options:{
-
-responsive:true,
-
-plugins:{legend:{display:false}},
-
-scales:{x:{display:false},y:{display:false}}
-
-}
-
-});
-
-</script>
-
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{% static 'js/dashboard.js' %}?v=20260907" defer></script>
+<script src="{% static 'js/market_socket.js' %}" defer></script>
 {% endblock %}

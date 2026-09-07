@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db.models import Max
+from django.db.models import Count, Max
 from django.utils import timezone
 
 from apps.companies.models import Company
@@ -41,12 +42,16 @@ class ScannerReadinessSnapshot:
     distinct_quote_instruments: int
     stock_coverage: float
     quote_coverage: float
+    sufficient_history_instruments: int = 0
+    history_coverage: float = 0.0
     latest_quote_timestamp: datetime | None = None
     report_instruments: int | None = None
     report_coverage: float | None = None
     cache_error: str | None = None
     provider_empty: str = DATA_UNAVAILABLE
     provider_failed: str = DATA_UNAVAILABLE
+    mature_eligible_instruments: int | None = None
+    legitimately_new_instruments: int = 0
 
 
 class ScannerDataReadinessService:
@@ -54,6 +59,8 @@ class ScannerDataReadinessService:
 
     MIN_STOCK_COVERAGE = 0.95
     MIN_QUOTE_COVERAGE = 0.95
+    MIN_HISTORY_COVERAGE = 0.95
+    REQUIRED_DAILY_HISTORY = 252
     # Two independent 95% input sets can overlap by as little as 90%.
     MIN_REPORT_COVERAGE = 0.90
     MARKET_CLOSE_GRACE = time(16, 0)
@@ -74,12 +81,24 @@ class ScannerDataReadinessService:
 
     @staticmethod
     def eligible_companies():
-        return Company.objects.filter(
-            exchange="NSE",
-            is_active=True,
-            instrument_status=Company.InstrumentStatus.ACTIVE,
-            series="EQ",
-        ).exclude(upstox_instrument_key="")
+        return Company.scanner_eligible()
+
+    @classmethod
+    def mature_companies(cls, eligible, session_dates, sufficient_company_ids):
+        calendar = sorted(set(session_dates))
+        if len(calendar) < cls.REQUIRED_DAILY_HISTORY:
+            return eligible, 0
+        sufficient_ids = set(sufficient_company_ids)
+        new_ids = []
+        for company in eligible.only("id", "listing_date"):
+            if company.id in sufficient_ids or company.listing_date is None:
+                continue
+            available_sessions = len(calendar) - bisect_left(
+                calendar, company.listing_date
+            )
+            if available_sessions < cls.REQUIRED_DAILY_HISTORY:
+                new_ids.append(company.id)
+        return eligible.exclude(id__in=new_ids), len(new_ids)
 
     @classmethod
     def collect(
@@ -109,6 +128,15 @@ class ScannerDataReadinessService:
             latest_quote = eligible_quotes.aggregate(
                 latest=Max("provider_timestamp")
             )["latest"]
+            session_dates = stock_query.filter(session_date__lte=expected).values_list(
+                "session_date", flat=True
+            ).distinct()
+            sufficient_company_ids = list(
+                stock_query.values("company_id")
+                .annotate(session_count=Count("session_date", distinct=True))
+                .filter(session_count__gte=cls.REQUIRED_DAILY_HISTORY)
+                .values_list("company_id", flat=True)
+            )
             mode = "cloud_compact"
         else:
             eligible_symbols = eligible.values("symbol")
@@ -144,7 +172,31 @@ class ScannerDataReadinessService:
             latest_quote = eligible_quotes.aggregate(
                 latest=Max("provider_timestamp")
             )["latest"]
+            session_dates = [
+                session
+                for value in stock_query.values_list(
+                    "candle_time", flat=True
+                ).distinct()
+                if (session := DailyHistorySyncService.session_date(value)) <= expected
+            ]
+            sufficient_symbols = list(
+                stock_query.values("symbol", "exchange")
+                .annotate(session_count=Count("candle_time", distinct=True))
+                .filter(session_count__gte=cls.REQUIRED_DAILY_HISTORY)
+                .values_list("symbol", flat=True)
+            )
+            sufficient_company_ids = list(
+                eligible.filter(symbol__in=sufficient_symbols).values_list(
+                    "id", flat=True
+                )
+            )
             mode = "standard"
+
+        mature, legitimately_new = cls.mature_companies(
+            eligible, session_dates, sufficient_company_ids
+        )
+        mature_count = mature.values("id").distinct().count()
+        sufficient_history = len(sufficient_company_ids)
 
         report_count: int | None = None
         report_coverage: float | None = None
@@ -161,7 +213,7 @@ class ScannerDataReadinessService:
                     )
                     eligible_keys = {
                         (str(exchange).upper(), str(symbol).upper())
-                        for exchange, symbol in eligible.values_list("exchange", "symbol")
+                        for exchange, symbol in mature.values_list("exchange", "symbol")
                     }
                     report_keys = {
                         (
@@ -171,7 +223,7 @@ class ScannerDataReadinessService:
                         for report in reports
                     }
                     report_count = len(report_keys.intersection(eligible_keys))
-                    report_coverage = cls._coverage(report_count, eligible_count)
+                    report_coverage = cls._coverage(report_count, mature_count)
                 except InvalidScanCache as exc:
                     report_count = 0
                     report_coverage = 0.0
@@ -188,10 +240,14 @@ class ScannerDataReadinessService:
             distinct_quote_instruments=quote_count,
             stock_coverage=cls._coverage(stock_count, eligible_count),
             quote_coverage=cls._coverage(quote_count, eligible_count),
+            sufficient_history_instruments=sufficient_history,
+            history_coverage=cls._coverage(sufficient_history, mature_count),
             latest_quote_timestamp=latest_quote,
             report_instruments=report_count,
             report_coverage=report_coverage,
             cache_error=cache_error,
+            mature_eligible_instruments=mature_count,
+            legitimately_new_instruments=legitimately_new,
         )
 
     @classmethod
@@ -207,6 +263,8 @@ class ScannerDataReadinessService:
             failures.append("INCOMPLETE_STOCK_COVERAGE")
         if snapshot.quote_coverage < cls.MIN_QUOTE_COVERAGE:
             failures.append("INCOMPLETE_QUOTE_COVERAGE")
+        if snapshot.history_coverage < cls.MIN_HISTORY_COVERAGE:
+            failures.append("INSUFFICIENT_HISTORY_COVERAGE")
         if snapshot.report_coverage is not None:
             if snapshot.cache_error:
                 failures.append("SCAN_CACHE_INVALID")
@@ -235,10 +293,16 @@ class ScannerDataReadinessService:
         return " ".join([
             f"mode={snapshot.mode}",
             f"active_eligible_instruments={snapshot.active_eligible_instruments}",
+            "mature_eligible_instruments="
+            f"{snapshot.mature_eligible_instruments}",
+            "legitimately_new_instruments="
+            f"{snapshot.legitimately_new_instruments}",
             f"distinct_stock_instruments={snapshot.distinct_stock_instruments}",
             f"distinct_quote_instruments={snapshot.distinct_quote_instruments}",
             f"stock_coverage_pct={snapshot.stock_coverage * 100:.2f}",
             f"quote_coverage_pct={snapshot.quote_coverage * 100:.2f}",
+            f"sufficient_history_instruments={snapshot.sufficient_history_instruments}",
+            f"history_coverage_pct={snapshot.history_coverage * 100:.2f}",
             f"report_instruments={report_count}",
             f"report_coverage_pct={report_coverage}",
             f"latest_stored_session={cls._value(snapshot.latest_stock_session)}",
