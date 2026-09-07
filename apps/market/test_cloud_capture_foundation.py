@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
@@ -89,8 +89,10 @@ class FakeHistory:
     def __init__(self, rows):
         self.rows = rows
         self.calls = []
+        self.ranges = []
     def candles(self, *, instrument_key, interval, from_date, to_date):
         self.calls.append(instrument_key)
+        self.ranges.append((from_date, to_date))
         return SimpleNamespace(data=SimpleNamespace(candles=self.rows))
     def dataframe(self, candles):
         return pd.DataFrame(candles, columns=[
@@ -208,22 +210,55 @@ class CloudCompactPersistenceTests(TestCase):
 
         self.assertEqual(service.historical.calls, ["NSE_EQ|OLDER"])
 
-    def test_current_but_insufficient_history_is_prioritized_for_backfill(self):
-        sessions = pd.bdate_range(end="2026-08-07", periods=10)
+    def test_repair_prioritizes_zero_then_underfilled_and_skips_mature(self):
+        underfilled = Company.objects.create(
+            symbol="UNDER", exchange="NSE", name="Underfilled",
+            isin="INE000000003", upstox_instrument_key="NSE_EQ|UNDER",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        mature = Company.objects.create(
+            symbol="MATURE", exchange="NSE", name="Mature",
+            isin="INE000000004", upstox_instrument_key="NSE_EQ|MATURE",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        sessions = pd.bdate_range(end="2026-08-07", periods=252)
         CloudDailyCandle.objects.bulk_create([
             CloudDailyCandle(
-                company=self.active, session_date=session.date(),
+                company=mature, session_date=session.date(),
                 open=100, high=105, low=99, close=103, volume=1000,
             ) for session in sessions
+        ])
+        CloudDailyCandle.objects.bulk_create([
+            CloudDailyCandle(
+                company=underfilled, session_date=session.date(),
+                open=100, high=105, low=99, close=103, volume=1000,
+            ) for session in sessions[-10:]
         ])
         service = self.service([self.row()])
 
         result = service.sync_stock_history(
-            date(2026, 8, 7), limit=1, include_insufficient=True
+            date(2026, 8, 7), limit=3, include_insufficient=True
         )
 
-        self.assertEqual(result["attempted"], 1)
-        self.assertEqual(service.historical.calls, ["NSE_EQ|ACTIVE"])
+        self.assertEqual(result["attempted"], 2)
+        self.assertEqual(
+            service.historical.calls, ["NSE_EQ|ACTIVE", "NSE_EQ|UNDER"]
+        )
+        expected_start = date(2026, 8, 7) - timedelta(
+            days=service.INITIAL_CALENDAR_DAYS
+        )
+        self.assertEqual(
+            service.historical.ranges,
+            [(expected_start.isoformat(), "2026-08-07")] * 2,
+        )
 
     def test_current_active_master_wins_over_historical_suspended_archive(self):
         service = self.service([])
