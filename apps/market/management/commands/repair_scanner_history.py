@@ -23,9 +23,12 @@ class Command(BaseCommand):
         service = CloudEODIngestionService()
         service._ensure_provider_clients()
         latest_session = service.resolve_latest_session()
+        benchmark_rows = service.sync_benchmark(latest_session)
         result = service.sync_stock_history(
             latest_session, limit=limit, include_insufficient=True
         )
         self.stdout.write("SCANNER_HISTORY_REPAIR " + json.dumps({
-            "latest_session": latest_session.isoformat(), **result,
+            "latest_session": latest_session.isoformat(),
+            "benchmark_rows": benchmark_rows,
+            **result,
         }, sort_keys=True))

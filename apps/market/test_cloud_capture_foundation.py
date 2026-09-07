@@ -260,6 +260,24 @@ class CloudCompactPersistenceTests(TestCase):
             [(expected_start.isoformat(), "2026-08-07")] * 2,
         )
 
+    def test_repair_updates_stale_mature_history_after_gaps(self):
+        sessions = pd.bdate_range(end="2026-08-06", periods=252)
+        CloudDailyCandle.objects.bulk_create([
+            CloudDailyCandle(
+                company=self.active, session_date=session.date(),
+                open=100, high=105, low=99, close=103, volume=1000,
+            ) for session in sessions
+        ])
+        service = self.service([self.row()])
+
+        result = service.sync_stock_history(
+            date(2026, 8, 7), limit=1, include_insufficient=True
+        )
+
+        self.assertEqual(result["attempted"], 1)
+        self.assertEqual(service.historical.calls, ["NSE_EQ|ACTIVE"])
+        self.assertEqual(service.historical.ranges, [("2026-08-07", "2026-08-07")])
+
     def test_current_active_master_wins_over_historical_suspended_archive(self):
         service = self.service([])
         service.MINIMUM_INSTRUMENT_MASTER_ROWS = 1
