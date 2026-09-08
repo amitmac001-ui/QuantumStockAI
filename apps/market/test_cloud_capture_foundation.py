@@ -278,6 +278,33 @@ class CloudCompactPersistenceTests(TestCase):
         self.assertEqual(service.historical.calls, ["NSE_EQ|ACTIVE"])
         self.assertEqual(service.historical.ranges, [("2026-08-07", "2026-08-07")])
 
+    def test_history_repair_preserves_company_eligibility(self):
+        original = (
+            self.active.is_active,
+            self.active.instrument_status,
+            self.active.provider_segment,
+            self.active.provider_instrument_type,
+            self.active.provider_security_type,
+            self.active.security_category,
+        )
+
+        self.service([self.row()]).sync_stock_history(
+            date(2026, 8, 7), limit=1, include_insufficient=True
+        )
+
+        self.active.refresh_from_db()
+        self.assertEqual(
+            (
+                self.active.is_active,
+                self.active.instrument_status,
+                self.active.provider_segment,
+                self.active.provider_instrument_type,
+                self.active.provider_security_type,
+                self.active.security_category,
+            ),
+            original,
+        )
+
     def test_current_active_master_wins_over_historical_suspended_archive(self):
         service = self.service([])
         service.MINIMUM_INSTRUMENT_MASTER_ROWS = 1

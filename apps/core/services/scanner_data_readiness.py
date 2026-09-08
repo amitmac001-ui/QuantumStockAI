@@ -117,11 +117,27 @@ class ScannerDataReadinessService:
             latest_benchmark = CloudBenchmarkCandle.objects.aggregate(
                 latest=Max("session_date")
             )["latest"]
-            aligned = latest_stock if latest_stock == latest_benchmark else None
+            # A bounded repair writes a new session in batches. Do not let that
+            # partial session hide the most complete prior stock/benchmark session.
+            best_common_session = (
+                stock_query.filter(
+                    session_date__lte=expected,
+                    session_date__in=CloudBenchmarkCandle.objects.values(
+                        "session_date"
+                    ),
+                )
+                .values("session_date")
+                .annotate(instruments=Count("company_id", distinct=True))
+                .order_by("-instruments", "-session_date")
+                .first()
+            )
+            aligned = (
+                best_common_session["session_date"]
+                if best_common_session else None
+            )
             stock_count = (
-                stock_query.filter(session_date=aligned)
-                .values("company_id").distinct().count()
-                if aligned else 0
+                best_common_session["instruments"]
+                if best_common_session else 0
             )
             eligible_quotes = CloudQuoteSnapshot.objects.filter(company__in=eligible)
             quote_count = eligible_quotes.values("company_id").distinct().count()
