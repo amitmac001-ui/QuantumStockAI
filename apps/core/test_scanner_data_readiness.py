@@ -210,3 +210,29 @@ class ScannerReadinessDistinctCountTests(TestCase):
         self.assertEqual(snapshot.legitimately_new_instruments, 1)
         self.assertEqual(snapshot.sufficient_history_instruments, 1)
         self.assertEqual(snapshot.history_coverage, 1.0)
+
+    def test_partial_new_session_does_not_hide_complete_prior_session(self):
+        prior = date(2026, 8, 20)
+        partial = date(2026, 8, 21)
+        first = self._company("AAA")
+        second = self._company("BBB")
+        for company in (first, second):
+            self._candle(company, prior)
+            self._quote(company)
+        self._candle(first, partial)
+        for session in (prior, partial):
+            CloudBenchmarkCandle.objects.create(
+                session_date=session, open=100, high=102,
+                low=99, close=101, volume=1_000,
+            )
+
+        snapshot = ScannerDataReadinessService.collect(
+            now=datetime(2026, 8, 22, 10, 0, tzinfo=IST)
+        )
+
+        self.assertEqual(snapshot.latest_stock_session, partial)
+        self.assertEqual(snapshot.latest_benchmark_session, partial)
+        self.assertEqual(snapshot.aligned_session, prior)
+        self.assertEqual(snapshot.distinct_stock_instruments, 2)
+        self.assertEqual(snapshot.stock_coverage, 1.0)
+        self.assertIn("STALE_SESSION", ScannerDataReadinessService.failures(snapshot))
