@@ -27,6 +27,7 @@
             {% if form.password.errors %}<p class="field-error">{{ form.password.errors|striptags }}</p>{% endif %}
             <button type="submit" class="button button--primary button--full">Sign in</button>
         </form>
+        <p class="muted">New here? <a href="{% url 'website-signup' %}">Create account</a></p>
     </div>
     <p class="login-disclaimer">Market data and research signals may be delayed or unavailable. Nothing shown is guaranteed investment advice.</p>
 </section>

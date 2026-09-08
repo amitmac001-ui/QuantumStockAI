@@ -1,9 +1,28 @@
 from django.contrib.auth import login, logout
-from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.contrib.auth import get_user_model
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
+
+
+class WebsiteSignupForm(UserCreationForm):
+    class Meta(UserCreationForm.Meta):
+        model = get_user_model()
+        fields = ("email", "username")
+
+
+@require_http_methods(["GET", "POST"])
+def website_signup(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard:home")
+    form = WebsiteSignupForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        user = form.save()
+        login(request, user)
+        return redirect("dashboard:home")
+    return render(request, "registration/signup.html", {"form": form})
 
 
 @require_http_methods(["GET", "POST"])
