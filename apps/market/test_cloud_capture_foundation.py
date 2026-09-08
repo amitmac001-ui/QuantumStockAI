@@ -356,6 +356,50 @@ class CloudCompactPersistenceTests(TestCase):
 
         self.assertEqual(service.historical.calls, ["NSE_EQ|UNDER"])
 
+    def test_repair_prioritizes_attempted_underfilled_before_stale_mature(self):
+        mature = Company.objects.create(
+            symbol="MATURE", exchange="NSE", name="Mature",
+            isin="INE000000004", upstox_instrument_key="NSE_EQ|MATURE",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        for company, count in ((self.active, 10), (mature, 252)):
+            sessions = pd.bdate_range(end="2026-08-06", periods=count)
+            CloudDailyCandle.objects.bulk_create([
+                CloudDailyCandle(
+                    company=company, session_date=session.date(),
+                    open=100, high=105, low=99, close=103, volume=1000,
+                ) for session in sessions
+            ])
+        self.active.history_sync_last_attempt_at = datetime(
+            2026, 8, 6, 12, tzinfo=ZoneInfo("Asia/Kolkata")
+        )
+        self.active.save(update_fields=["history_sync_last_attempt_at"])
+        service = self.service([self.row()])
+
+        service.sync_stock_history(
+            date(2026, 8, 7), limit=1, include_insufficient=True
+        )
+
+        self.assertEqual(service.historical.calls, ["NSE_EQ|ACTIVE"])
+
+    @patch("apps.market.services.cloud_eod_ingestion_service.close_old_connections")
+    @patch("apps.market.services.cloud_eod_ingestion_service.connection.close")
+    def test_transient_database_write_is_retried_once(
+        self, close_connection, close_old_connections
+    ):
+        callback = Mock(side_effect=[OperationalError("connection terminated"), "ok"])
+
+        result = CloudEODIngestionService._retry_database_write(callback)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(callback.call_count, 2)
+        close_connection.assert_called_once_with()
+        close_old_connections.assert_called_once_with()
+
     def test_current_active_master_wins_over_historical_suspended_archive(self):
         service = self.service([])
         service.MINIMUM_INSTRUMENT_MASTER_ROWS = 1

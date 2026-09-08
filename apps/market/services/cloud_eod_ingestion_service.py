@@ -9,7 +9,9 @@ from decimal import Decimal
 from typing import Any
 
 import requests
-from django.db import connection, transaction
+from django.db import (
+    InterfaceError, OperationalError, close_old_connections, connection, transaction,
+)
 from django.db.models import Count, Max
 from django.utils import timezone
 
@@ -244,6 +246,17 @@ class CloudEODIngestionService:
         return list(deduplicated.values())
 
     @staticmethod
+    def _retry_database_write(callback):
+        for attempt in range(2):
+            try:
+                return callback()
+            except (OperationalError, InterfaceError):
+                if attempt:
+                    raise
+                connection.close()
+                close_old_connections()
+
+    @staticmethod
     def _flush_stock_rows(rows: list[CloudDailyCandle]) -> tuple[int, int]:
         if not rows:
             return 0, 0
@@ -256,13 +269,15 @@ class CloudEODIngestionService:
         existing = set(CloudDailyCandle.objects.filter(
             company_id__in=company_ids, session_date__in=dates,
         ).values_list("company_id", "session_date"))
-        CloudDailyCandle.objects.bulk_create(
-            rows, batch_size=1_000, update_conflicts=True,
-            unique_fields=["company", "session_date"],
-            update_fields=[
-                "open", "high", "low", "close", "volume",
-                "provider_timestamp", "data_quality_flags",
-            ],
+        CloudEODIngestionService._retry_database_write(
+            lambda: CloudDailyCandle.objects.bulk_create(
+                rows, batch_size=1_000, update_conflicts=True,
+                unique_fields=["company", "session_date"],
+                update_fields=[
+                    "open", "high", "low", "close", "volume",
+                    "provider_timestamp", "data_quality_flags",
+                ],
+            )
         )
         created = len(keys.difference(existing))
         return created, len(keys) - created
@@ -300,23 +315,24 @@ class CloudEODIngestionService:
                 )
             )
         ]
+        def repair_phase(company):
+            count = history_state[company.id][1]
+            attempted = company.history_sync_last_attempt_at is not None
+            if not include_insufficient:
+                return 0
+            if count == 0 and not attempted:
+                return 0
+            if count < self.MINIMUM_SCANNER_HISTORY_SESSIONS and not attempted:
+                return 1
+            if count < self.MINIMUM_SCANNER_HISTORY_SESSIONS:
+                return 2
+            return 3
+
         pending.sort(key=lambda company: (
-            (
-                company.history_sync_last_attempt_at is not None
-                if include_insufficient else False
+            repair_phase(company),
+            company.history_sync_last_attempt_at or datetime.min.replace(
+                tzinfo=datetime_timezone.utc
             ),
-            (
-                company.history_sync_last_attempt_at
-                or datetime.min.replace(tzinfo=datetime_timezone.utc)
-                if include_insufficient else datetime.min.replace(
-                    tzinfo=datetime_timezone.utc
-                )
-            ),
-            history_state[company.id][1] != 0 if include_insufficient else False,
-            (
-                history_state.get(company.id, (None, 0))[1]
-                >= self.MINIMUM_SCANNER_HISTORY_SESSIONS
-            ) if include_insufficient else False,
             history_state.get(company.id, (None, 0))[1] if include_insufficient else 0,
             latest_map.get(company.id) or date.min,
             company.history_sync_last_attempt_at is not None,
@@ -376,22 +392,26 @@ class CloudEODIngestionService:
             except Exception:
                 counters["failed"] += 1
         if attempted_companies:
-            Company.objects.bulk_update(
-                attempted_companies,
-                ["history_sync_last_attempt_at", "history_sync_last_success_session"],
-                batch_size=1_000,
+            self._retry_database_write(
+                lambda: Company.objects.bulk_update(
+                    attempted_companies,
+                    ["history_sync_last_attempt_at", "history_sync_last_success_session"],
+                    batch_size=1_000,
+                )
             )
         created, updated = self._flush_stock_rows(buffer)
         counters["created"] += created
         counters["rows_updated"] += updated
         if high_summaries:
-            Company.objects.bulk_update(
-                high_summaries,
-                [
-                    "three_year_high", "three_year_high_session",
-                    "three_year_window_start", "three_year_observations",
-                ],
-                batch_size=1_000,
+            self._retry_database_write(
+                lambda: Company.objects.bulk_update(
+                    high_summaries,
+                    [
+                        "three_year_high", "three_year_high_session",
+                        "three_year_window_start", "three_year_observations",
+                    ],
+                    batch_size=1_000,
+                )
             )
         return counters
 
