@@ -1,10 +1,13 @@
 from datetime import date, datetime, timedelta
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from django.db import IntegrityError, OperationalError, transaction
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.companies.models import Company
@@ -84,6 +87,25 @@ class ReadOnlyProviderTests(SimpleTestCase):
         self.assertEqual(parsed["change_percent"], 5)
         self.assertEqual(parsed["provider_timestamp"].isoformat(), "2026-08-07T15:30:00+05:30")
         self.assertIsNotNone(parsed["last_trade_time"])
+
+
+class RepairScannerHistoryCommandTests(SimpleTestCase):
+    @patch("apps.market.management.commands.repair_scanner_history.connection")
+    @patch("apps.market.management.commands.repair_scanner_history.CloudEODIngestionService")
+    def test_entirely_unavailable_batch_fails_instead_of_reporting_success(
+        self, service_class, database_connection
+    ):
+        database_connection.vendor = "postgresql"
+        service = service_class.return_value
+        service.resolve_latest_session.return_value = date(2026, 8, 7)
+        service.sync_benchmark.return_value = 0
+        service.sync_stock_history.return_value = {
+            "attempted": 2, "current": 0, "updated": 0,
+            "created": 0, "rows_updated": 0, "empty": 2, "failed": 0,
+        }
+
+        with self.assertRaises(CommandError):
+            call_command("repair_scanner_history", limit=2, stdout=StringIO())
 
 class FakeHistory:
     def __init__(self, rows):
@@ -304,6 +326,35 @@ class CloudCompactPersistenceTests(TestCase):
             ),
             original,
         )
+
+    def test_repair_does_not_starve_unattempted_underfilled_stock(self):
+        underfilled = Company.objects.create(
+            symbol="UNDER", exchange="NSE", name="Underfilled",
+            isin="INE000000003", upstox_instrument_key="NSE_EQ|UNDER",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        sessions = pd.bdate_range(end="2026-08-07", periods=10)
+        CloudDailyCandle.objects.bulk_create([
+            CloudDailyCandle(
+                company=underfilled, session_date=session.date(),
+                open=100, high=105, low=99, close=103, volume=1000,
+            ) for session in sessions
+        ])
+        self.active.history_sync_last_attempt_at = datetime(
+            2026, 8, 7, 12, tzinfo=ZoneInfo("Asia/Kolkata")
+        )
+        self.active.save(update_fields=["history_sync_last_attempt_at"])
+        service = self.service([self.row()])
+
+        service.sync_stock_history(
+            date(2026, 8, 7), limit=1, include_insufficient=True
+        )
+
+        self.assertEqual(service.historical.calls, ["NSE_EQ|UNDER"])
 
     def test_current_active_master_wins_over_historical_suspended_archive(self):
         service = self.service([])
