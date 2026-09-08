@@ -27,6 +27,14 @@ class Command(BaseCommand):
         result = service.sync_stock_history(
             latest_session, limit=limit, include_insufficient=True
         )
+        if (
+            result["attempted"]
+            and result["updated"] == 0
+            and result["empty"] + result["failed"] == result["attempted"]
+        ):
+            raise CommandError(
+                "Upstox returned no usable history for the entire repair batch."
+            )
         self.stdout.write("SCANNER_HISTORY_REPAIR " + json.dumps({
             "latest_session": latest_session.isoformat(),
             "benchmark_rows": benchmark_rows,

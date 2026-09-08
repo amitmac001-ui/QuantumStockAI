@@ -301,6 +301,17 @@ class CloudEODIngestionService:
             )
         ]
         pending.sort(key=lambda company: (
+            (
+                company.history_sync_last_attempt_at is not None
+                if include_insufficient else False
+            ),
+            (
+                company.history_sync_last_attempt_at
+                or datetime.min.replace(tzinfo=datetime_timezone.utc)
+                if include_insufficient else datetime.min.replace(
+                    tzinfo=datetime_timezone.utc
+                )
+            ),
             history_state[company.id][1] != 0 if include_insufficient else False,
             (
                 history_state.get(company.id, (None, 0))[1]
