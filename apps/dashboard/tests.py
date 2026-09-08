@@ -86,6 +86,15 @@ class WebsiteAuthenticationTests(TestCase):
         response = self.client.get("/")
         self.assertRedirects(response, "/login/?next=/", fetch_redirect_response=False)
 
+    def test_signup_creates_and_logs_in_user(self):
+        response = self.client.post("/signup/", {
+            "email": "new@example.com", "username": "new-trader",
+            "password1": "Strong-pass-456", "password2": "Strong-pass-456",
+        })
+        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertTrue(get_user_model().objects.filter(email="new@example.com").exists())
+        self.assertIn("_auth_user_id", self.client.session)
+
     def test_login_dashboard_and_logout_session_flow(self):
         response = self.client.post(
             "/login/",

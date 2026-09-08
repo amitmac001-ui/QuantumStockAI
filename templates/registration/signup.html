@@ -1,0 +1,27 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Create account · QuantumStock AI{% endblock %}
+
+{% block content %}
+<section class="login-shell">
+    <div class="login-brand"><span class="brand__mark">Q</span><span>QuantumStock <strong>AI</strong></span></div>
+    <div class="login-card">
+        <p class="eyebrow">Secure research workspace</p>
+        <h1>Create account</h1>
+        <p class="muted">Create your private dashboard login.</p>
+        <form method="post" class="login-form" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}<div class="form-error" role="alert">{{ form.non_field_errors|striptags }}</div>{% endif %}
+            {% for field in form %}
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<p class="muted">{{ field.help_text|safe }}</p>{% endif %}
+                {% if field.errors %}<p class="field-error">{{ field.errors|striptags }}</p>{% endif %}
+            {% endfor %}
+            <button type="submit" class="button button--primary button--full">Create account</button>
+        </form>
+        <p class="muted">Already registered? <a href="{% url 'website-login' %}">Sign in</a></p>
+    </div>
+    <p class="login-disclaimer">Market data and research signals may be delayed or unavailable. Nothing shown is guaranteed investment advice.</p>
+</section>
+{% endblock %}

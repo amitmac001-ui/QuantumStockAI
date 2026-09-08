@@ -25,7 +25,7 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
-from apps.accounts.web_views import website_login, website_logout
+from apps.accounts.web_views import website_login, website_logout, website_signup
 
 
 def health_check(request):
@@ -63,6 +63,7 @@ def readiness_check(request):
 urlpatterns = [
 
     path("login/", website_login, name="website-login"),
+    path("signup/", website_signup, name="website-signup"),
     path("logout/", website_logout, name="website-logout"),
 
     path(
