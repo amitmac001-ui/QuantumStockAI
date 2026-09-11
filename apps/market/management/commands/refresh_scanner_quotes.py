@@ -10,7 +10,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         service = CloudEODIngestionService()
         try:
-            updated = service.sync_quotes()
+            quote_result = service.sync_quotes()
+            updated = int(quote_result.get("updated", 0))
             eligible = Company.objects.filter(
                 exchange="NSE",
                 series="EQ",
