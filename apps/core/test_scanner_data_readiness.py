@@ -236,3 +236,26 @@ class ScannerReadinessDistinctCountTests(TestCase):
         self.assertEqual(snapshot.distinct_stock_instruments, 2)
         self.assertEqual(snapshot.stock_coverage, 1.0)
         self.assertIn("STALE_SESSION", ScannerDataReadinessService.failures(snapshot))
+
+    def test_latest_session_wins_when_it_meets_stock_coverage_floor(self):
+        prior = date(2026, 8, 20)
+        latest = date(2026, 8, 21)
+        companies = [self._company(f"S{index:02d}") for index in range(20)]
+        for company in companies:
+            self._candle(company, prior)
+            self._quote(company)
+        for company in companies[:19]:
+            self._candle(company, latest)
+        for session in (prior, latest):
+            CloudBenchmarkCandle.objects.create(
+                session_date=session, open=100, high=102,
+                low=99, close=101, volume=1_000,
+            )
+
+        snapshot = ScannerDataReadinessService.collect(
+            now=datetime(2026, 8, 22, 10, 0, tzinfo=IST)
+        )
+
+        self.assertEqual(snapshot.aligned_session, latest)
+        self.assertEqual(snapshot.stock_coverage, 0.95)
+        self.assertNotIn("STALE_SESSION", ScannerDataReadinessService.failures(snapshot))

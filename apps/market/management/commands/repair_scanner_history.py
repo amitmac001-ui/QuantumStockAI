@@ -25,7 +25,8 @@ class Command(BaseCommand):
         service = CloudEODIngestionService()
         service._ensure_provider_clients()
         listing_dates = ListingDateRecoveryService.recover(
-            settings.BASE_DIR / "data" / "EQUITY_L.csv"
+            settings.BASE_DIR / "data" / "EQUITY_L.csv",
+            source_url=ListingDateRecoveryService.OFFICIAL_NSE_EQUITY_MASTER_URL,
         )
         latest_session = service.resolve_latest_session()
         benchmark_rows = service.sync_benchmark(latest_session)

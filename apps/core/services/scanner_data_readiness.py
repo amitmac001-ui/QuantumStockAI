@@ -3,6 +3,7 @@ from __future__ import annotations
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from math import ceil
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -119,7 +120,7 @@ class ScannerDataReadinessService:
             )["latest"]
             # A bounded repair writes a new session in batches. Do not let that
             # partial session hide the most complete prior stock/benchmark session.
-            best_common_session = (
+            common_sessions = (
                 stock_query.filter(
                     session_date__lte=expected,
                     session_date__in=CloudBenchmarkCandle.objects.values(
@@ -128,8 +129,17 @@ class ScannerDataReadinessService:
                 )
                 .values("session_date")
                 .annotate(instruments=Count("company_id", distinct=True))
-                .order_by("-instruments", "-session_date")
+            )
+            # Prefer the newest common session once it independently meets the
+            # same stock-coverage safety floor. A marginally more complete old
+            # session must not make otherwise-ready current data appear stale.
+            best_common_session = (
+                common_sessions.filter(
+                    instruments__gte=ceil(eligible_count * cls.MIN_STOCK_COVERAGE)
+                )
+                .order_by("-session_date")
                 .first()
+                or common_sessions.order_by("-instruments", "-session_date").first()
             )
             aligned = (
                 best_common_session["session_date"]

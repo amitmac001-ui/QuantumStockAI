@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+from io import StringIO
 from datetime import datetime
 from pathlib import Path
+
+import requests
 
 from apps.companies.models import Company
 
@@ -10,16 +13,30 @@ from apps.companies.models import Company
 class ListingDateRecoveryService:
     """Fill missing listing dates from the bundled official NSE equity master."""
 
+    OFFICIAL_NSE_EQUITY_MASTER_URL = (
+        "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+    )
+
     @staticmethod
     def _date(value: str):
         value = str(value or "").strip().upper()
         return datetime.strptime(value, "%d-%b-%Y").date() if value else None
 
     @classmethod
-    def recover(cls, csv_file: str | Path) -> dict[str, int]:
+    def recover(
+        cls, csv_file: str | Path, *, source_url: str | None = None, http=None
+    ) -> dict[str, int | str]:
         by_isin = {}
         by_symbol = {}
-        with Path(csv_file).open("r", encoding="utf-8-sig", newline="") as handle:
+        source = "bundled_official_nse_master"
+        if source_url:
+            response = (http or requests).get(source_url, timeout=30)
+            response.raise_for_status()
+            handle = StringIO(response.content.decode("utf-8-sig"))
+            source = source_url
+        else:
+            handle = Path(csv_file).open("r", encoding="utf-8-sig", newline="")
+        with handle:
             for row in csv.DictReader(handle, skipinitialspace=True):
                 if str(row.get("SERIES") or "").strip().upper() != "EQ":
                     continue
@@ -63,6 +80,7 @@ class ListingDateRecoveryService:
         if updates:
             Company.objects.bulk_update(updates, ["listing_date"], batch_size=1_000)
         return {
+            "source": source,
             "missing_before": len(candidates),
             "recovered": len(updates),
             "matched_by_isin": matched_by_isin,

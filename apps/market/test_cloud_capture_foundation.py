@@ -143,6 +143,34 @@ class ListingDateRecoveryTests(TestCase):
         self.assertEqual(missing.listing_date, date(2008, 10, 6))
         self.assertEqual(existing.listing_date, date(2001, 1, 1))
         self.assertEqual(result["recovered"], 1)
+        self.assertEqual(result["source"], "bundled_official_nse_master")
+
+    def test_current_official_nse_download_can_be_used(self):
+        company = Company.objects.create(
+            symbol="CURRENT", exchange="NSE", name="Current",
+            isin="INE000000031", upstox_instrument_key="NSE_EQ|INE000000031",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        response = Mock()
+        response.content = (
+            b"SYMBOL,NAME OF COMPANY,SERIES,DATE OF LISTING,ISIN NUMBER\n"
+            b"CURRENT,Current,EQ,12-SEP-2025,INE000000031\n"
+        )
+        http = Mock()
+        http.get.return_value = response
+
+        result = ListingDateRecoveryService.recover(
+            "fallback.csv", source_url="https://nse.example/EQUITY_L.csv", http=http
+        )
+
+        company.refresh_from_db()
+        self.assertEqual(company.listing_date, date(2025, 9, 12))
+        self.assertEqual(result["source"], "https://nse.example/EQUITY_L.csv")
+        response.raise_for_status.assert_called_once_with()
 
     def test_symbol_fallback_rejects_conflicting_isin(self):
         company = Company.objects.create(
