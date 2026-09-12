@@ -11,7 +11,7 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.companies.models import Company
-from apps.market.models import CloudBenchmarkCandle, CloudDailyCandle
+from apps.market.models import CloudBenchmarkCandle, CloudDailyCandle, CloudQuoteSnapshot
 from apps.market.providers.historical_client import HistoricalClient
 from apps.market.providers.upstox_client import UpstoxClient
 from apps.market.services.cloud_eod_ingestion_service import CloudEODIngestionService
@@ -152,6 +152,40 @@ class CloudCompactPersistenceTests(TestCase):
             historical=FakeHistory(rows), quotes=Mock(), sleep=lambda _: None,
             now=datetime(2026, 8, 7, 17, tzinfo=ZoneInfo("Asia/Kolkata")),
         )
+
+    @patch("apps.market.services.cloud_eod_ingestion_service.UpstoxClient")
+    def test_direct_quote_sync_initializes_provider_and_persists_equity(self, client_class):
+        item = SimpleNamespace(
+            symbol="ACTIVE", last_price=105, net_change=5, volume=1234,
+            timestamp="2026-08-07T15:30:00+05:30",
+            last_trade_time=1786096800000,
+            ohlc=SimpleNamespace(open=101, high=106, low=100, close=100),
+        )
+        client_class.return_value.quote.return_value = SimpleNamespace(
+            data={"NSE_EQ:ACTIVE": item}
+        )
+        service = CloudEODIngestionService(sleep=lambda _: None)
+
+        result = service.sync_quotes()
+
+        client_class.assert_called_once_with()
+        self.assertEqual(result["equities_updated"], 1)
+        self.assertTrue(CloudQuoteSnapshot.objects.filter(company=self.active).exists())
+
+    def test_quote_batch_failure_returns_sanitized_diagnostic(self):
+        class ProviderFailure(Exception):
+            status = 401
+
+        client = Mock()
+        client.quote.side_effect = ProviderFailure("secret-token-must-not-appear")
+        service = CloudEODIngestionService(quotes=client, sleep=lambda _: None)
+
+        result = service.sync_quotes()
+
+        self.assertGreater(result["batches_failed"], 0)
+        self.assertEqual(result["equities_updated"], 0)
+        self.assertIn("ProviderFailure status=401", result["failures"][0])
+        self.assertNotIn("secret-token", str(result))
 
     def test_current_active_master_wins_over_overlapping_suspended_feed(self):
         active_rows = [

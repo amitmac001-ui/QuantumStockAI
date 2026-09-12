@@ -460,7 +460,18 @@ class CloudEODIngestionService:
                     raise
                 self.sleep(min(2 ** (attempt - 1), 8))
 
+    def _ensure_quote_client(self):
+        if self.quotes is None:
+            self.quotes = UpstoxClient()
+
+    @staticmethod
+    def _sanitized_provider_error(exc: Exception) -> str:
+        status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+        suffix = f" status={status}" if status is not None else ""
+        return f"{type(exc).__name__}{suffix}"
+
     def sync_quotes(self) -> dict[str, int]:
+        self._ensure_quote_client()
         companies = list(Company.scanner_eligible().only(
             "id", "symbol", "exchange", "name", "upstox_instrument_key"
         ))
@@ -478,14 +489,19 @@ class CloudEODIngestionService:
         index_quotes = []
         counters = {
             "requested": len(identities), "updated": 0, "skipped": 0,
-            "batches_failed": 0,
+            "batches_failed": 0, "equities_updated": 0,
+            "indexes_updated": 0, "failures": [],
         }
         for batch in self._chunks(list(identities), self.QUOTE_BATCH_SIZE):
             try:
                 response = self._request_quote_batch(batch)
-            except Exception:
+            except Exception as exc:
                 counters["batches_failed"] += 1
                 counters["skipped"] += len(batch)
+                counters["failures"].append(
+                    f"batch_size={len(batch)} "
+                    f"error={self._sanitized_provider_error(exc)}"
+                )
                 continue
             data = getattr(response, "data", None) or {}
             for instrument_key in batch:
@@ -531,6 +547,8 @@ class CloudEODIngestionService:
         )
         if index_quotes:
             MarketService.bulk_save(index_quotes)
+        counters["equities_updated"] = len(rows)
+        counters["indexes_updated"] = len(index_quotes)
         counters["updated"] = len(rows) + len(index_quotes)
         return counters
 
