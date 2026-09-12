@@ -11,6 +11,7 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.companies.models import Company
+from apps.companies.services.listing_date_recovery import ListingDateRecoveryService
 from apps.market.models import CloudBenchmarkCandle, CloudDailyCandle, CloudQuoteSnapshot
 from apps.market.providers.historical_client import HistoricalClient
 from apps.market.providers.upstox_client import UpstoxClient
@@ -91,9 +92,10 @@ class ReadOnlyProviderTests(SimpleTestCase):
 
 class RepairScannerHistoryCommandTests(SimpleTestCase):
     @patch("apps.market.management.commands.repair_scanner_history.connection")
+    @patch("apps.market.management.commands.repair_scanner_history.ListingDateRecoveryService")
     @patch("apps.market.management.commands.repair_scanner_history.CloudEODIngestionService")
     def test_entirely_unavailable_batch_fails_instead_of_reporting_success(
-        self, service_class, database_connection
+        self, service_class, listing_dates, database_connection
     ):
         database_connection.vendor = "postgresql"
         service = service_class.return_value
@@ -106,6 +108,62 @@ class RepairScannerHistoryCommandTests(SimpleTestCase):
 
         with self.assertRaises(CommandError):
             call_command("repair_scanner_history", limit=2, stdout=StringIO())
+
+
+class ListingDateRecoveryTests(TestCase):
+    def test_recovers_missing_date_by_isin_without_overwriting_existing_date(self):
+        missing = Company.objects.create(
+            symbol="RECOVER", exchange="NSE", name="Recover",
+            isin="INE000000011", upstox_instrument_key="NSE_EQ|INE000000011",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        existing = Company.objects.create(
+            symbol="KEEP", exchange="NSE", name="Keep", isin="INE000000012",
+            upstox_instrument_key="NSE_EQ|INE000000012", is_active=True,
+            series="EQ", listing_date=date(2001, 1, 1),
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        csv_file = StringIO(
+            "SYMBOL,NAME OF COMPANY,SERIES,DATE OF LISTING,ISIN NUMBER\n"
+            "RECOVER,Recover,EQ,06-OCT-2008,INE000000011\n"
+            "KEEP,Keep,EQ,07-NOV-2009,INE000000012\n"
+        )
+        with patch("pathlib.Path.open", return_value=csv_file):
+            result = ListingDateRecoveryService.recover("official.csv")
+
+        missing.refresh_from_db()
+        existing.refresh_from_db()
+        self.assertEqual(missing.listing_date, date(2008, 10, 6))
+        self.assertEqual(existing.listing_date, date(2001, 1, 1))
+        self.assertEqual(result["recovered"], 1)
+
+    def test_symbol_fallback_rejects_conflicting_isin(self):
+        company = Company.objects.create(
+            symbol="RENAMED", exchange="NSE", name="Renamed",
+            isin="INE000000021", upstox_instrument_key="NSE_EQ|INE000000021",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        csv_file = StringIO(
+            "SYMBOL,NAME OF COMPANY,SERIES,DATE OF LISTING,ISIN NUMBER\n"
+            "RENAMED,Old issuer,EQ,06-OCT-2008,INE999999999\n"
+        )
+        with patch("pathlib.Path.open", return_value=csv_file):
+            result = ListingDateRecoveryService.recover("official.csv")
+
+        company.refresh_from_db()
+        self.assertIsNone(company.listing_date)
+        self.assertEqual(result["unresolved"], 1)
 
 class FakeHistory:
     def __init__(self, rows):

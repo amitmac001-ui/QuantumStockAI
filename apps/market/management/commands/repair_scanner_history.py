@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
+from apps.companies.services.listing_date_recovery import ListingDateRecoveryService
 from apps.market.services.cloud_eod_ingestion_service import CloudEODIngestionService
 
 
@@ -22,6 +24,9 @@ class Command(BaseCommand):
             raise CommandError("--limit must be between 1 and 500.")
         service = CloudEODIngestionService()
         service._ensure_provider_clients()
+        listing_dates = ListingDateRecoveryService.recover(
+            settings.BASE_DIR / "data" / "EQUITY_L.csv"
+        )
         latest_session = service.resolve_latest_session()
         benchmark_rows = service.sync_benchmark(latest_session)
         result = service.sync_stock_history(
@@ -38,5 +43,6 @@ class Command(BaseCommand):
         self.stdout.write("SCANNER_HISTORY_REPAIR " + json.dumps({
             "latest_session": latest_session.isoformat(),
             "benchmark_rows": benchmark_rows,
+            "listing_dates": listing_dates,
             **result,
         }, sort_keys=True))
