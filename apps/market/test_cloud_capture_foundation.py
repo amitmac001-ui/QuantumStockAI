@@ -187,6 +187,29 @@ class CloudCompactPersistenceTests(TestCase):
         self.assertIn("ProviderFailure status=401", result["failures"][0])
         self.assertNotIn("secret-token", str(result))
 
+    @patch(
+        "apps.market.management.commands.refresh_scanner_quotes."
+        "CloudEODIngestionService.sync_quotes"
+    )
+    def test_quote_refresh_coverage_uses_authoritative_scanner_universe(self, sync):
+        Company.objects.create(
+            symbol="LEGACY", exchange="NSE", name="Legacy",
+            isin="INE000000099", upstox_instrument_key="NSE_EQ|LEGACY",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            security_category=Company.SecurityCategory.NON_OPERATING,
+        )
+        sync.return_value = {
+            "updated": 1, "equities_updated": 1, "indexes_updated": 0,
+            "batches_failed": 0, "skipped": 0, "failures": [],
+        }
+        output = StringIO()
+
+        call_command("refresh_scanner_quotes", stdout=output)
+
+        self.assertIn("eligible=1 updated=1 coverage_pct=100.00", output.getvalue())
+
     def test_current_active_master_wins_over_overlapping_suspended_feed(self):
         active_rows = [
             {

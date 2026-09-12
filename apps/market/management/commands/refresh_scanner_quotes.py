@@ -12,12 +12,7 @@ class Command(BaseCommand):
         try:
             quote_result = service.sync_quotes()
             updated = int(quote_result.get("equities_updated", 0))
-            eligible = Company.objects.filter(
-                exchange="NSE",
-                series="EQ",
-                is_active=True,
-                instrument_status=Company.InstrumentStatus.ACTIVE,
-            ).exclude(upstox_instrument_key="").count()
+            eligible = Company.scanner_eligible().values("id").distinct().count()
         except Exception as exc:
             raise CommandError(str(exc)) from exc
         coverage = (updated / eligible * 100.0) if eligible else 0.0
