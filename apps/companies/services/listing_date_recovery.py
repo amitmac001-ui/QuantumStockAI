@@ -30,10 +30,16 @@ class ListingDateRecoveryService:
         by_symbol = {}
         source = "bundled_official_nse_master"
         if source_url:
-            response = (http or requests).get(source_url, timeout=30)
-            response.raise_for_status()
-            handle = StringIO(response.content.decode("utf-8-sig"))
-            source = source_url
+            try:
+                response = (http or requests).get(source_url, timeout=30)
+                response.raise_for_status()
+                handle = StringIO(response.content.decode("utf-8-sig"))
+                source = source_url
+            except requests.RequestException:
+                # NSE Archives is occasionally slow/unavailable. The bundled
+                # file is itself an official NSE snapshot and keeps repair
+                # runs deterministic without weakening any readiness gate.
+                handle = Path(csv_file).open("r", encoding="utf-8-sig", newline="")
         else:
             handle = Path(csv_file).open("r", encoding="utf-8-sig", newline="")
         with handle:

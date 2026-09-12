@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 from django.db import IntegrityError, OperationalError, transaction
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -192,6 +193,32 @@ class ListingDateRecoveryTests(TestCase):
         company.refresh_from_db()
         self.assertIsNone(company.listing_date)
         self.assertEqual(result["unresolved"], 1)
+
+    def test_official_nse_timeout_uses_bundled_official_snapshot(self):
+        company = Company.objects.create(
+            symbol="FALLBACK", exchange="NSE", name="Fallback",
+            isin="INE000000041", upstox_instrument_key="NSE_EQ|INE000000041",
+            is_active=True, series="EQ",
+            instrument_status=Company.InstrumentStatus.ACTIVE,
+            provider_segment="NSE_EQ", provider_instrument_type="EQ",
+            provider_security_type="NORMAL",
+            security_category=Company.SecurityCategory.OPERATING_EQUITY,
+        )
+        csv_file = StringIO(
+            "SYMBOL,NAME OF COMPANY,SERIES,DATE OF LISTING,ISIN NUMBER\n"
+            "FALLBACK,Fallback,EQ,11-SEP-2024,INE000000041\n"
+        )
+        http = Mock()
+        http.get.side_effect = requests.ReadTimeout("official source timed out")
+
+        with patch("pathlib.Path.open", return_value=csv_file):
+            result = ListingDateRecoveryService.recover(
+                "fallback.csv", source_url="https://nse.example/EQUITY_L.csv", http=http
+            )
+
+        company.refresh_from_db()
+        self.assertEqual(company.listing_date, date(2024, 9, 11))
+        self.assertEqual(result["source"], "bundled_official_nse_master")
 
 class FakeHistory:
     def __init__(self, rows):
