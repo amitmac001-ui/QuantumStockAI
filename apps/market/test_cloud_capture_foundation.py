@@ -198,7 +198,7 @@ class CloudCompactPersistenceTests(TestCase):
             is_active=True, series="EQ",
             instrument_status=Company.InstrumentStatus.ACTIVE,
             provider_segment="NSE_EQ", provider_instrument_type="EQ",
-            security_category=Company.SecurityCategory.NON_OPERATING,
+            security_category=Company.SecurityCategory.OTHER,
         )
         sync.return_value = {
             "updated": 1, "equities_updated": 1, "indexes_updated": 0,
